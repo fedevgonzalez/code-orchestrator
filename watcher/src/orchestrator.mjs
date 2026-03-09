@@ -20,7 +20,7 @@ import { saveCheckpoint, loadCheckpoint, checkpointPath } from "./checkpoint.mjs
 import { TaskStatus, PhaseStatus, DEFAULT_CONFIG } from "./models.mjs";
 import { getJsonlDir } from "./jsonl.mjs";
 import { existsSync, mkdirSync, appendFileSync } from "fs";
-import { join } from "path";
+import { join, basename } from "path";
 import { execSync } from "child_process";
 import { randomUUID } from "crypto";
 
@@ -73,9 +73,11 @@ export class Orchestrator {
   _initJsonlWriter() {
     const dir = getJsonlDir(this.cwd);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    this._jsonlFile = join(dir, `${randomUUID()}.jsonl`);
+    // Use a stable filename per project so restarts don't create new sessions in pixel.lab
+    const projectName = basename(this.cwd);
+    this._jsonlFile = join(dir, `orchestrator-${projectName}.jsonl`);
     this._jsonlMsgId = randomUUID();
-    // Write initial record so reporter detects the session
+    // Write init record (appends to existing file on restart)
     this._writeJsonl({
       type: "system", subtype: "init",
       message: { content: [{ type: "text", text: "Orchestrator session started" }] },
