@@ -248,10 +248,22 @@ function startOrchestrator(forceResume = false) {
 
   // Run the orchestrator and handle completion/crash
   currentOrchestrator.run().then(() => {
-    state.orchestrator.status = currentOrchestrator.status === "completed" ? "completed" : "stopped";
-    console.log(`[SUPERVISOR] Orchestrator finished: ${state.orchestrator.status}`);
-    broadcast({ type: "orchestrator_completed", status: state.orchestrator.status, timestamp: Date.now() });
+    const orchStatus = currentOrchestrator.status;
     currentOrchestrator = null;
+
+    if (orchStatus === "completed") {
+      state.orchestrator.status = "completed";
+      console.log(`[SUPERVISOR] Orchestrator finished: completed`);
+      broadcast({ type: "orchestrator_completed", status: "completed", timestamp: Date.now() });
+      return;
+    }
+
+    // Orchestrator ended but not completed (e.g. PTY died, phases incomplete)
+    // Treat as crash and auto-restart
+    console.log(`[SUPERVISOR] Orchestrator ended with status "${orchStatus}" — treating as crash for auto-restart`);
+    state.orchestrator.status = "crashed";
+    state.orchestrator.lastCrashAt = Date.now();
+    triggerAutoRestart();
   }).catch((err) => {
     console.error(`[SUPERVISOR] Orchestrator crashed: ${err.message}`);
     state.orchestrator.status = "crashed";
@@ -265,25 +277,30 @@ function startOrchestrator(forceResume = false) {
       timestamp: Date.now(),
     });
 
-    // Auto-restart with backoff
-    if (state.orchestrator.restarts >= MAX_RESTARTS) {
-      console.error(`[SUPERVISOR] Max restarts (${MAX_RESTARTS}) reached. Stopping.`);
-      broadcast({ type: "orchestrator_max_restarts", timestamp: Date.now() });
-      return;
-    }
-
-    const backoff = Math.min(5000 * Math.pow(2, state.orchestrator.restarts), 60000);
-    state.orchestrator.restarts++;
-    state.orchestrator.status = "restarting";
-
-    console.log(`[SUPERVISOR] Restarting in ${backoff / 1000}s (attempt ${state.orchestrator.restarts}/${MAX_RESTARTS})...`);
-    broadcast({ type: "orchestrator_restarting", in_ms: backoff, attempt: state.orchestrator.restarts, timestamp: Date.now() });
-
-    setTimeout(() => {
-      console.log("[SUPERVISOR] Restarting with --resume...");
-      startOrchestrator(true);
-    }, backoff);
+    triggerAutoRestart();
   });
+}
+
+// ── Auto-restart with backoff ─────────────────────────────────────────────
+
+function triggerAutoRestart() {
+  if (state.orchestrator.restarts >= MAX_RESTARTS) {
+    console.error(`[SUPERVISOR] Max restarts (${MAX_RESTARTS}) reached. Stopping.`);
+    broadcast({ type: "orchestrator_max_restarts", timestamp: Date.now() });
+    return;
+  }
+
+  const backoff = Math.min(5000 * Math.pow(2, state.orchestrator.restarts), 60000);
+  state.orchestrator.restarts++;
+  state.orchestrator.status = "restarting";
+
+  console.log(`[SUPERVISOR] Restarting in ${backoff / 1000}s (attempt ${state.orchestrator.restarts}/${MAX_RESTARTS})...`);
+  broadcast({ type: "orchestrator_restarting", in_ms: backoff, attempt: state.orchestrator.restarts, timestamp: Date.now() });
+
+  setTimeout(() => {
+    console.log("[SUPERVISOR] Restarting with --resume...");
+    startOrchestrator(true);
+  }, backoff);
 }
 
 // ── Graceful shutdown ─────────────────────────────────────────────────────
