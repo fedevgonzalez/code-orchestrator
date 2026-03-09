@@ -1,148 +1,182 @@
-# Claude Orchestrator — Project Brief
+# Claude Orchestrator v2 — Project Brief
 
 ## What is this?
 
-A cross-platform Python CLI tool that orchestrates Claude Code sessions autonomously.
-It launches Claude Code in a real terminal (PTY), feeds it tasks one by one, and monitors
-progress via the JSONL transcript files that Claude Code writes to `~/.claude/projects/`.
+A Node.js CLI tool that orchestrates Claude Code sessions autonomously to build
+entire SaaS applications from a spec file. It drives Claude Code through phased
+execution using headless `claude -p` (pipe mode), with automatic code review,
+validation, and crash recovery.
 
 ## How it works
 
 ```
-orchestrator.py
-├── Read tasks from tasks.json (or generate them via Claude API from a spec)
-├── Spawn `claude --dangerously-skip-permissions` in a real PTY
-├── Watch the JSONL file in ~/.claude/projects/<project-hash>/
-├── Detect turn completion (record type=system, subtype=turn_duration)
-├── Send next task via PTY stdin
-├── Optionally validate output before continuing
-└── Loop until all tasks complete
+watcher.mjs (supervisor)
+├── HTTP + WebSocket server for dashboard / monitoring
+├── Auto-restart with exponential backoff on crash
+└── Spawns Orchestrator engine
+    └── orchestrator.mjs
+        ├── Parse spec → generate phased execution plan
+        ├── For each phase:
+        │   ├── Execute tasks via `claude -p --resume <sessionId>`
+        │   ├── Validate output (file checks, build, lint, DB, e2e)
+        │   ├── Self-review via same Claude session
+        │   ├── Fix rejected code automatically
+        │   └── Gate check (required files, commands)
+        ├── Final comprehensive review
+        └── Checkpoint after every task for crash recovery
 ```
 
 ## Architecture
 
-### PTY Layer (cross-platform)
-- **Windows**: Use `pywinpty` (ConPTY) to spawn Claude Code in a real pseudo-terminal
-- **Linux/Mac**: Use `pexpect` to spawn Claude Code in a Unix PTY
-- Abstract behind a simple interface: `spawn(cmd, cwd)`, `send(text)`, `read()`, `close()`
+### Headless Claude CLI (`claude-cli.mjs`)
 
-### JSONL Watcher
-- Claude Code writes JSONL transcripts to `~/.claude/projects/<hash>/<session-id>.jsonl`
-- The hash is derived from the project path (e.g., `G:\GitHub\my-project` -> `G--GitHub-my-project`)
-- Watch the newest `.jsonl` file in the project's directory
-- Parse records to detect:
-  - `type=system, subtype=turn_duration` → turn finished, agent is idle, ready for next input
-  - `type=assistant, content[].type=tool_use` → agent is working (using tools)
-  - `type=assistant, content[].type=text` → agent is responding with text
-  - `type=user, content contains "<command-name>/exit</command-name>"` → session ended
+Instead of spawning Claude Code in a PTY (which caused ConPTY crashes on Windows
+under PM2), each task is executed as a separate `claude -p` invocation:
 
-### Task Queue
-- Tasks are defined in a `tasks.json` file:
-```json
-{
-  "project": "my-saas-app",
-  "cwd": "G:/GitHub/my-saas-app",
-  "tasks": [
-    {
-      "id": "init",
-      "prompt": "Initialize a Next.js 15 project with TypeScript, Tailwind, and Prisma",
-      "validate": "check file: package.json, tsconfig.json, prisma/schema.prisma"
-    },
-    {
-      "id": "auth",
-      "depends_on": "init",
-      "prompt": "Implement JWT authentication with login/register endpoints",
-      "validate": "run: npm test"
-    },
-    {
-      "id": "tests",
-      "depends_on": "auth",
-      "prompt": "Write comprehensive tests for the auth module",
-      "validate": "run: npm test"
-    }
-  ]
-}
+```
+claude -p "prompt" --output-format json --resume <sessionId> --dangerously-skip-permissions
 ```
 
-### Orchestrator Loop
-```
-1. Load tasks.json
-2. Find next task (respecting depends_on)
-3. Spawn Claude Code in project cwd (if not already running)
-4. Wait for Claude to be ready (detect initial turn_duration in JSONL)
-5. Send task prompt via PTY
-6. Watch JSONL for turn_duration (task complete)
-7. If validate is set:
-   a. "check file: X" → verify file exists
-   b. "run: cmd" → run command, check exit code
-   c. If validation fails, send a follow-up: "The validation failed: {error}. Fix it."
-8. Mark task as done, go to step 2
-9. When all tasks complete, send /exit to Claude Code
-```
+- **Session continuity**: `--session-id <uuid>` on first call, `--resume <uuid>`
+  on subsequent calls. Full conversation context (files read, tools used, history)
+  is maintained across all prompts within a project.
+- **Structured output**: Returns `{ result, session_id, cost_usd, duration_ms }`
+  as JSON for programmatic parsing.
+- **No PTY, no ANSI parsing**: Each invocation blocks until complete and returns
+  clean structured data.
+- **One JSONL per project**: Claude Code creates one JSONL file per session. Since
+  we reuse the same session across all prompts, only one JSONL file is created per
+  project — keeping pixel.lab/observers clean.
+
+### Supervisor (`watcher.mjs`)
+
+- Parses CLI args (`--cwd`, `--spec`, `--resume`, `--port`, `--dev-port`, etc.)
+- Starts HTTP server with REST API (`/health`, `/state`, `/logs`, `/restart`, `/stop`)
+- WebSocket for real-time dashboard updates
+- Auto-restart with exponential backoff (5s → 10s → 20s → ... max 60s)
+- Progress-based restart counter reset: counter resets to 0 on each `phase_done`
+- Max restarts: 50 (configurable via `--max-restarts`)
+- PID file + dev-port file for external watchdog integration
+
+### Orchestrator Engine (`orchestrator.mjs`)
+
+- Loads or builds execution plan from spec file
+- Maintains single Claude session across all phases via `--resume`
+- Checkpoint persistence: saves state after every task including `sessionId`
+- On resume: reconciles stale phase statuses (phases from crashed sessions whose
+  tasks are all done get marked as DONE automatically)
+- Completion check: considers both phase-level and task-level completion
+
+### Reviewer (`reviewer.mjs`)
+
+- Uses separate `claude -p` calls (no session persistence) for code review
+- Cleans up reviewer-created JSONL files to avoid ghost agents in observers
+- Task review: checks correctness, completeness, quality (score 7+ = approved)
+- Final review: architecture, security, test coverage (score 8+ = production-ready)
+
+### Validator (`validator.mjs`)
+
+Per-phase validation with multiple check types:
+- **File checks**: Verify expected files exist
+- **Build check**: `npm run build` must succeed
+- **Lint check**: `npx next lint` must pass
+- **TypeScript check**: `npx tsc --noEmit` must pass
+- **Database check**: Verify connection and migrations
+- **E2E tests**: Playwright smoke tests
+- **Custom validators**: onboarding-files, email-files, seed-files, env, seo, legal
+
+### Spec Parser (`spec.mjs`)
+
+Converts a markdown spec file into a phased execution plan with 24 phases:
+scaffold → database → auth → core-api → payments → frontend → onboarding →
+integration → ux-polish → nextspark-polish → seed-data → landing → seo →
+legal → email → analytics → security → support → testing → screenshots →
+performance → cicd → deploy → launch-assets
 
 ## File Structure
 
 ```
 claude-orchestrator/
-├── orchestrator.py        # Main entry point + CLI
-├── pty_adapter.py         # Cross-platform PTY abstraction (winpty / pexpect)
-├── jsonl_watcher.py       # Watch JSONL files, parse Claude Code state
-├── task_runner.py         # Task queue logic, validation, retry
-├── tasks.json             # Example task file
-├── requirements.txt       # pywinpty, pexpect (conditional)
-└── README.md
+├── BRIEF.md                  # This file
+├── spec.example.md           # Example spec file
+├── watcher/
+│   ├── watcher.mjs           # Supervisor: HTTP + WS + auto-restart
+│   ├── cli.mjs               # CLI wrapper (PM2 management)
+│   ├── package.json
+│   └── src/
+│       ├── orchestrator.mjs  # Main engine: phased execution loop
+│       ├── claude-cli.mjs    # Headless claude -p adapter
+│       ├── pty.mjs           # Legacy PTY adapter (deprecated)
+│       ├── reviewer.mjs      # Code review via claude -p
+│       ├── validator.mjs     # Per-phase validation checks
+│       ├── spec.mjs          # Spec parser → execution plan
+│       ├── checkpoint.mjs    # Checkpoint save/load
+│       ├── models.mjs        # Constants (TaskStatus, PhaseStatus, etc.)
+│       ├── jsonl.mjs         # JSONL directory helpers
+│       └── interactive.mjs   # Legacy interactive detector (deprecated)
 ```
 
-## CLI Usage
+## Usage
 
 ```bash
-# Run all tasks from a file
-python orchestrator.py --tasks tasks.json
+# Start a new project from spec
+node watcher.mjs --cwd /path/to/project --spec spec.md
 
-# Run with a spec file (generates tasks via Claude API first)
-python orchestrator.py --spec "Build a TODO app with React and Express"
+# Resume from checkpoint after crash
+node watcher.mjs --cwd /path/to/project --resume
 
-# Run a single task
-python orchestrator.py --cwd ./my-project --prompt "Add user authentication"
+# With PM2 (recommended for long-running builds)
+npx pm2 start watcher.mjs --name orch-myproject -- \
+  --cwd /path/to/project --spec spec.md --port 3171 --dev-port 3001 --verbose
 
-# Dry run (show what would be executed)
-python orchestrator.py --tasks tasks.json --dry-run
+# Check status
+curl http://localhost:3171/health
+curl http://localhost:3171/state
 
-# Verbose mode (show JSONL events in real time)
-python orchestrator.py --tasks tasks.json --verbose
+# Monitor logs
+npx pm2 logs orch-myproject
 ```
 
 ## Key Design Decisions
 
-1. **Real PTY, not pipes** — Claude Code uses ink (React TUI) which requires a real terminal.
-   Pipes break the rendering. PTY gives Claude Code a real terminal environment.
+1. **Headless `claude -p`, not PTY** — PTY (ConPTY) crashed under PM2 on Windows
+   due to `AttachConsole failed`. Each `claude -p` invocation is a clean process
+   that blocks until complete. No ANSI parsing, no zombie processes.
 
-2. **JSONL for state, not stdout parsing** — Claude Code's stdout has ANSI escape codes
-   and TUI rendering. Parsing it is fragile. The JSONL files are structured, reliable,
-   and already contain everything we need.
+2. **Session continuity via `--resume`** — All prompts within a project share one
+   Claude session. Context (files read, tools used, conversation) persists across
+   all 24 phases. On crash recovery, the session resumes from where it left off.
 
-3. **One session per project** — Don't spawn multiple Claude Code instances in the same
-   project directory. Claude Code uses file locks. One session at a time.
+3. **One JSONL per project** — Stable filename (`orchestrator-<project>.jsonl`)
+   prevents observers like pixel.lab from seeing multiple agents per project.
 
-4. **Validation is optional** — Simple tasks don't need validation. Complex tasks can
-   verify files exist or run test suites.
+4. **Checkpoint after every task** — If the process dies, it resumes from the
+   exact task where it left off, with the same Claude session.
 
-5. **No Claude API dependency** — The orchestrator itself doesn't call Claude API.
-   It just drives Claude Code CLI. The optional `--spec` mode could use the API to
-   generate tasks, but that's a future enhancement.
+5. **Two-level completion check** — Marks run as completed if all phases are DONE
+   *or* if all tasks are DONE (handles stale phase status from crashed sessions).
+
+6. **Auto-restart with progress reset** — Restart counter resets on each phase
+   completion, so transient failures don't exhaust the restart budget.
 
 ## Platform Notes
 
-- **Windows**: Requires `pywinpty`. Install via `pip install pywinpty`.
-  The claude CLI is at `C:\Users\<user>\.claude\local\claude.exe` or on PATH.
-- **Linux/Mac**: Uses `pexpect` (usually pre-installed). The claude CLI is on PATH.
-- **JSONL path**: `~/.claude/projects/<hash>/` where hash is the cwd with separators replaced by dashes.
+- **Windows**: Claude CLI at `~/.claude/local/claude.exe` or on PATH. Uses
+  `taskkill /PID /T /F` for process tree cleanup.
+- **Linux/Mac**: Claude CLI on PATH. Standard process signals for cleanup.
+- **JSONL path**: `~/.claude/projects/<hash>/` where hash is the cwd with
+  separators replaced by dashes (e.g., `G--GitHub-my-project`).
 
 ## Dependencies
 
-```
-pywinpty>=2.0; sys_platform == 'win32'
-pexpect>=4.8; sys_platform != 'win32'
+```json
+{
+  "chokidar": "^3.6.0",    // File watching (validators)
+  "node-pty": "^1.0.0",    // Legacy PTY (deprecated, kept for compat)
+  "pg": "^8.20.0",         // Database validation
+  "which": "^4.0.0",       // Find claude binary
+  "ws": "^8.16.0"          // WebSocket server
+}
 ```
 
-No other dependencies. Pure Python 3.10+.
+Node.js 18+ required. No Python dependencies.
