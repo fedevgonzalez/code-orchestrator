@@ -1,20 +1,17 @@
 /**
  * Orchestrator Engine — The main build→validate→review→fix loop.
  *
- * Drives Claude Code through phased execution:
- *   1. Spawn Claude Code in PTY
- *   2. For each phase: run tasks sequentially
- *   3. Each task: send prompt → wait idle → validate → review → fix if needed
+ * Drives Claude Code through phased execution using headless `-p` mode:
+ *   1. For each phase: run tasks sequentially via `claude -p`
+ *   2. Each task: send prompt → get result → validate → review → fix if needed
+ *   3. Session continuity via `--resume <sessionId>`
  *   4. Gate check between phases
  *   5. Final review at the end
  *   6. Checkpoint after every task for crash recovery
  */
 
-import { ClaudePTY } from "./pty.mjs";
-import { JSONLWatcher } from "./jsonl.mjs";
-import { InteractiveDetector } from "./interactive.mjs";
+import { runClaudePrompt, findClaudeBinary } from "./claude-cli.mjs";
 import { runValidation, runPhaseValidation, runPlaywrightTests } from "./validator.mjs";
-// reviewer.mjs no longer used — reviews happen in-PTY to keep a single JSONL session
 import { buildPlanFromSpec } from "./spec.mjs";
 import { saveCheckpoint, loadCheckpoint, checkpointPath } from "./checkpoint.mjs";
 import { TaskStatus, PhaseStatus, DEFAULT_CONFIG } from "./models.mjs";
@@ -57,27 +54,22 @@ export class Orchestrator {
     this.completedTasks = [];
     this.startedAt = null;
 
-    // Components (initialized on start)
-    this.pty = null;
-    this.jsonlWatcher = null;
-    this.interactiveDetector = null;
+    // Claude CLI session — maintained across all prompts via --resume
+    this.sessionId = null;
+    this._firstCall = true;
 
     // Resume flag
     this._resume = opts.resume || false;
   }
 
   // ── JSONL writer for pixel.lab reporter ────────────────────────────
-  // Writes JSONL records so the pixel-office-reporter can detect and report
-  // this orchestrator session to pixel.lab's observer.
 
   _initJsonlWriter() {
     const dir = getJsonlDir(this.cwd);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    // Use a stable filename per project so restarts don't create new sessions in pixel.lab
     const projectName = basename(this.cwd);
     this._jsonlFile = join(dir, `orchestrator-${projectName}.jsonl`);
     this._jsonlMsgId = randomUUID();
-    // Write init record (appends to existing file on restart)
     this._writeJsonl({
       type: "system", subtype: "init",
       message: { content: [{ type: "text", text: "Orchestrator session started" }] },
@@ -98,7 +90,6 @@ export class Orchestrator {
     } catch {}
   }
 
-  /** Write a tool_use record (makes pixel.lab show the agent as "active") */
   _writeToolStart(toolName, description) {
     const toolId = `tool_${randomUUID().slice(0, 8)}`;
     this._writeJsonl({
@@ -110,7 +101,6 @@ export class Orchestrator {
     return toolId;
   }
 
-  /** Write a tool_result record (makes pixel.lab show the tool as "done") */
   _writeToolEnd(toolId, result) {
     this._writeJsonl({
       type: "user",
@@ -118,7 +108,6 @@ export class Orchestrator {
     });
   }
 
-  /** Write an idle/turn_duration record (makes pixel.lab show agent as "waiting") */
   _writeIdle(durationMs) {
     this._writeJsonl({ type: "system", subtype: "turn_duration", duration_ms: durationMs });
   }
@@ -144,6 +133,7 @@ export class Orchestrator {
       currentTaskIdx: this.currentTaskIdx,
       completedTasks: this.completedTasks,
       startedAt: this.startedAt,
+      sessionId: this.sessionId, // persist for resume
     };
     saveCheckpoint(state, checkpointPath(this.cwd));
   }
@@ -160,146 +150,53 @@ export class Orchestrator {
     this.currentTaskIdx = state.currentTaskIdx || 0;
     this.completedTasks = state.completedTasks || [];
     this.startedAt = state.startedAt;
+    this.sessionId = state.sessionId || null;
+    this._firstCall = !this.sessionId;
 
     console.log(`[ORCH] Resumed: phase ${this.currentPhaseIdx}, task ${this.currentTaskIdx}`);
+    if (this.sessionId) {
+      console.log(`[ORCH] Resuming Claude session: ${this.sessionId}`);
+    }
     return true;
   }
 
-  // ── PTY + JSONL setup ──────────────────────────────────────────────
+  // ── Send prompt to Claude (headless -p mode) ────────────────────────
 
-  _spawnClaude() {
-    // Don't clean JSONLs — let the PTY's JSONL live so pixel.lab can track the session.
-    // Reviewer's `claude -p` JSONLs are cleaned by reviewer.mjs after each call.
+  async _runPrompt(prompt, timeoutMs) {
+    const timeout = timeoutMs || this.config.turnTimeout;
 
-    this.pty = new ClaudePTY();
-    this.pty.spawn(this.cwd);
+    // Generate session ID on first call
+    if (!this.sessionId) {
+      this.sessionId = randomUUID();
+      this._firstCall = true;
+      console.log(`[ORCH] New Claude session: ${this.sessionId}`);
+    }
 
-    // Set up interactive prompt detection + debug logging
-    this.interactiveDetector = new InteractiveDetector(this.config.interactiveRules);
-    this.pty.onData((data) => {
-      // Log PTY output for debugging (strip ANSI codes, first 200 chars)
-      const clean = data.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "").trim();
-      if (clean && this.verbose) {
-        console.log(`[PTY:OUT] ${clean.slice(0, 200)}`);
-      }
+    const start = Date.now();
+    console.log(`[ORCH] Sending prompt (${prompt.length} chars, session: ${this.sessionId.slice(0, 8)}...)`);
 
-      const response = this.interactiveDetector.detect(data);
-      if (response !== null) {
-        console.log(`[ORCH] Auto-responding to prompt: "${response}"`);
-        this.pty.write(response + "\n");
-      }
+    const result = await runClaudePrompt(prompt, this.cwd, {
+      sessionId: this.sessionId,
+      firstCall: this._firstCall,
+      timeoutMs: timeout,
+      onStderr: this.verbose ? (data) => process.stderr.write(`[CLAUDE] ${data}`) : null,
     });
 
-    // Set up JSONL watcher with auto-lock: since we cleaned all old JSONLs before spawn,
-    // the first JSONL that appears will be the PTY's — lock to it automatically.
-    this.jsonlWatcher = new JSONLWatcher(this.cwd);
-    this.jsonlWatcher.start();
-    this.jsonlWatcher.skipToEnd();
-    this.jsonlWatcher.autoLockOnFirstFile();
-    console.log("[ORCH] JSONL watcher started with auto-lock enabled");
+    this._firstCall = false;
+    const elapsed = Math.floor((Date.now() - start) / 1000);
+    console.log(`[ORCH] Response received (${elapsed}s, cost: $${result.costUsd.toFixed(4)})`);
 
-    this._emit("claude_spawned", { pid: this.pty.pid });
-    console.log(`[ORCH] Claude Code spawned (PID: ${this.pty.pid})`);
-  }
-
-  _killClaude() {
-    if (this.jsonlWatcher) {
-      this.jsonlWatcher.stop();
-      this.jsonlWatcher = null;
-    }
-    if (this.pty) {
-      this.pty.exit();
-      this.pty = null;
-    }
-  }
-
-  // ── Wait for Claude to be idle ────────────────────────────────────
-
-  async _waitForIdle(timeoutMs) {
-    const timeout = timeoutMs || this.config.turnTimeout;
-    const start = Date.now();
-
-    // Wait a minimum of 5s before checking for idle — Claude needs time
-    // to start processing after receiving the prompt.
-    await this._sleep(5000);
-
-    // Strategy: detect idle from PTY output.
-    // Claude Code shows "❯" prompt when idle and ready for input.
-    // It also shows "(thinking)" or tool output while working.
-    let sawActivity = false;
-
-    while (Date.now() - start < timeout) {
-      // Bail early if PTY died
-      if (!this.pty?.isAlive) {
-        throw new Error("PTY process died while waiting for idle");
-      }
-      const recent = this.pty?.peekRecent(1000) || "";
-      // Strip ALL ANSI escape sequences including CSI, OSC, and private sequences
-      const clean = recent
-        .replace(/\x1b\][^\x07]*(\x07|\x1b\\)/g, "")  // OSC sequences (title bar)
-        .replace(/\x1b\[[?]?[0-9;]*[a-zA-Z]/g, "")     // CSI sequences (including ?2026h etc)
-        .replace(/\x1b[()][0-9A-Z]/g, "")               // Character set sequences
-        .replace(/[\x00-\x1f]/g, " ")
-        .trim();
-
-      // Detect activity (Claude is working)
-      if (clean.includes("thinking") || clean.includes("tool_use") || clean.includes("Wrote") ||
-          clean.includes("Read") || clean.includes("Created") || clean.includes("Updated") ||
-          clean.includes("armonizing") || clean.includes("wisting") || clean.includes("file")) {
-        sawActivity = true;
-      }
-
-      // Detect idle: look for ❯ anywhere in recent output
-      const hasPrompt = clean.includes("❯");
-      const elapsed = Math.floor((Date.now() - start) / 1000);
-
-      if (hasPrompt && (sawActivity || elapsed > 15)) {
-        // Either we saw explicit activity, or enough time passed that Claude
-        // must have processed (handles fast responses without "thinking" keywords)
-        console.log(`[ORCH] Detected idle (PTY prompt) after ${elapsed}s`);
-        return true;
-      }
-
-      // Debug: log detection state every 30s
-      if (elapsed % 30 === 0 && elapsed > 0) {
-        console.log(`[ORCH] Idle check: ${elapsed}s, activity=${sawActivity}, hasPrompt=${hasPrompt}, cleanEnd=${JSON.stringify(clean.slice(-50))}`);
-      }
-
-      await this._sleep(3000);
+    // Update session ID if Claude returned a different one
+    if (result.sessionId && result.sessionId !== this.sessionId) {
+      console.log(`[ORCH] Session ID updated: ${result.sessionId}`);
+      this.sessionId = result.sessionId;
     }
 
-    console.error(`[ORCH] Timed out waiting for idle after ${timeout / 1000}s`);
-    return false;
+    return result;
   }
 
   _sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  // ── Send prompt to Claude ─────────────────────────────────────────
-
-  async _sendPrompt(prompt) {
-    if (!this.pty?.isAlive) {
-      console.error("[ORCH] PTY is dead, re-spawning...");
-      this._spawnClaude();
-      await this._sleep(this.config.initialSettleTime);
-      // Skip old JSONL
-      if (this.jsonlWatcher.filePath) {
-        this.jsonlWatcher.skipToEnd();
-      }
-    }
-
-    // Clear old buffer
-    this.pty.readBuffer();
-    // Reset JSONL watcher state so it can detect new idle
-    this.jsonlWatcher.currentState = "unknown";
-
-    // Claude Code's TUI: write text, small delay, then \r to submit
-    const singleLine = prompt.replace(/\n+/g, " ").replace(/\s+/g, " ").trim();
-    this.pty.write(singleLine);
-    await this._sleep(500);
-    this.pty.write("\r");
-    console.log(`[ORCH] Sent prompt (${singleLine.length} chars)`);
   }
 
   // ── Task execution ────────────────────────────────────────────────
@@ -314,40 +211,23 @@ export class Orchestrator {
     this._emit("task_start", { taskId: task.id, phaseId: phase.id });
     this._saveState();
 
-    // Write JSONL tool_use so pixel.lab shows this agent as active
     const toolId = this._writeToolStart("execute_task", `${taskLabel}: ${task.prompt.slice(0, 80)}`);
 
-    // Send the task prompt
-    await this._sendPrompt(task.prompt);
-
-    // Wait for Claude to finish
-    const idle = await this._waitForIdle();
-    if (!idle) {
-      task.status = TaskStatus.FAILED;
-      task.error = "Timed out waiting for completion";
-      console.error(`[TASK] ${taskLabel}: TIMED OUT`);
-      this._emit("task_timeout", { taskId: task.id });
-      return false;
-    }
-
-    // Small settle time
-    await this._sleep(2000);
+    // Run the task prompt via claude -p
+    const result = await this._runPrompt(task.prompt);
 
     // Validation
     if (task.validate) {
       console.log(`[TASK] ${taskLabel}: Validating...`);
       const validation = runValidation(task, this.cwd);
-      // Handle both sync and async validation (server check is async)
-      const result = validation instanceof Promise ? await validation : validation;
+      const valResult = validation instanceof Promise ? await validation : validation;
 
-      if (!result.ok) {
-        console.log(`[TASK] ${taskLabel}: Validation failed: ${result.message}`);
-        this._emit("task_validation_failed", { taskId: task.id, message: result.message });
+      if (!valResult.ok) {
+        console.log(`[TASK] ${taskLabel}: Validation failed: ${valResult.message}`);
+        this._emit("task_validation_failed", { taskId: task.id, message: valResult.message });
 
-        // Send fix prompt
-        const fixPrompt = `The validation check failed: ${result.message}\n\nPlease fix the issue so that the validation passes: ${task.validate}`;
-        await this._sendPrompt(fixPrompt);
-        await this._waitForIdle();
+        const fixPrompt = `The validation check failed: ${valResult.message}\n\nPlease fix the issue so that the validation passes: ${task.validate}`;
+        await this._runPrompt(fixPrompt);
 
         // Re-validate once
         const retry = runValidation(task, this.cwd);
@@ -356,12 +236,11 @@ export class Orchestrator {
           console.log(`[TASK] ${taskLabel}: Validation still failing after fix: ${retryResult.message}`);
         }
       } else {
-        console.log(`[TASK] ${taskLabel}: Validation passed: ${result.message}`);
+        console.log(`[TASK] ${taskLabel}: Validation passed: ${valResult.message}`);
       }
     }
 
-    // Self-review: ask the same PTY to review its own work (no separate claude -p process)
-    // This keeps a single JSONL session — clean for pixel.lab tracking.
+    // Self-review via claude -p (same session, maintains context)
     if (!this.noReview) {
       task.status = TaskStatus.REVIEWING;
       this._emit("task_reviewing", { taskId: task.id });
@@ -371,55 +250,40 @@ export class Orchestrator {
         `Respond with ONLY a JSON object on a single line: {"approved": true/false, "score": 1-10, "issues": ["issue1"]}. ` +
         `Score 7+ means approved.`;
 
-      await this._sendPrompt(reviewPrompt);
-      const reviewIdle = await this._waitForIdle();
+      const reviewResult = await this._runPrompt(reviewPrompt);
+      const reviewText = reviewResult.result || "";
 
-      if (reviewIdle) {
-        // Parse review from PTY output
-        const reviewOutput = this.pty.peekRecent(2000);
-        const reviewClean = reviewOutput.replace(/\x1b\][^\x07]*(\x07|\x1b\\)/g, "")
-          .replace(/\x1b\[[?]?[0-9;]*[a-zA-Z]/g, "")
-          .replace(/[\x00-\x1f]/g, " ");
+      const jsonMatch = reviewText.match(/\{[^{}]*"approved"\s*:\s*(true|false)[^{}]*"score"\s*:\s*(\d+)[^{}]*\}/);
+      if (jsonMatch) {
+        try {
+          const review = JSON.parse(jsonMatch[0]);
+          task.reviewScore = review.score || 5;
+          task.reviewCycles = 1;
+          const approved = review.approved ?? task.reviewScore >= 7;
 
-        const jsonMatch = reviewClean.match(/\{[^{}]*"approved"\s*:\s*(true|false)[^{}]*"score"\s*:\s*(\d+)[^{}]*\}/);
-        if (jsonMatch) {
-          try {
-            const review = JSON.parse(jsonMatch[0]);
-            task.reviewScore = review.score || 5;
-            task.reviewCycles = 1;
-            const approved = review.approved ?? task.reviewScore >= 7;
+          this._emit("task_reviewed", {
+            taskId: task.id,
+            score: task.reviewScore,
+            approved,
+            issues: review.issues || [],
+          });
 
-            this._emit("task_reviewed", {
-              taskId: task.id,
-              score: task.reviewScore,
-              approved,
-              issues: review.issues || [],
-            });
-
-            if (approved) {
-              console.log(`[TASK] ${taskLabel}: Review APPROVED (score: ${task.reviewScore})`);
-            } else {
-              console.log(`[TASK] ${taskLabel}: Review REJECTED (score: ${task.reviewScore}), fixing...`);
-              task.status = TaskStatus.FIXING;
-              const fixPrompt = "Fix the issues you identified in your review above. Make sure all code is correct and complete.";
-              await this._sendPrompt(fixPrompt);
-              await this._waitForIdle();
-              task.reviewScore = Math.max(task.reviewScore, 7); // assume fixed
-              await this._sleep(2000);
-            }
-          } catch {
-            console.log(`[TASK] ${taskLabel}: Could not parse review JSON, assuming OK`);
-            task.reviewScore = 7;
-            task.reviewCycles = 1;
+          if (approved) {
+            console.log(`[TASK] ${taskLabel}: Review APPROVED (score: ${task.reviewScore})`);
+          } else {
+            console.log(`[TASK] ${taskLabel}: Review REJECTED (score: ${task.reviewScore}), fixing...`);
+            task.status = TaskStatus.FIXING;
+            await this._runPrompt("Fix the issues you identified in your review above. Make sure all code is correct and complete.");
+            task.reviewScore = Math.max(task.reviewScore, 7);
           }
-        } else {
-          console.log(`[TASK] ${taskLabel}: No review JSON found in output, assuming OK`);
+        } catch {
+          console.log(`[TASK] ${taskLabel}: Could not parse review JSON, assuming OK`);
           task.reviewScore = 7;
           task.reviewCycles = 1;
         }
       } else {
-        console.log(`[TASK] ${taskLabel}: Review timed out, continuing`);
-        task.reviewScore = 5;
+        console.log(`[TASK] ${taskLabel}: No review JSON found in output, assuming OK`);
+        task.reviewScore = 7;
         task.reviewCycles = 1;
       }
     }
@@ -429,7 +293,6 @@ export class Orchestrator {
     this._emit("task_done", { taskId: task.id, score: task.reviewScore });
     this._saveState();
 
-    // Write JSONL tool_result + idle so pixel.lab updates the agent status
     this._writeToolEnd(toolId, `${taskLabel} done (score: ${task.reviewScore})`);
     this._writeIdle(Date.now() - this.startedAt);
 
@@ -448,12 +311,10 @@ export class Orchestrator {
     this._emit("phase_start", { phaseId: phase.id, name: phase.name });
     this._saveState();
 
-    // Execute tasks in order, respecting dependencies
     for (let i = this.currentTaskIdx; i < phase.tasks.length; i++) {
       const task = phase.tasks[i];
       this.currentTaskIdx = i;
 
-      // Check dependency
       if (task.dependsOn) {
         const dep = phase.tasks.find((t) => t.id === task.dependsOn);
         if (dep && dep.status !== TaskStatus.DONE) {
@@ -463,7 +324,6 @@ export class Orchestrator {
         }
       }
 
-      // Skip already completed tasks (resume support)
       if (task.status === TaskStatus.DONE) {
         console.log(`[TASK] ${task.id}: Already done (resumed)`);
         continue;
@@ -471,11 +331,10 @@ export class Orchestrator {
 
       const ok = await this._executeTask(task, phase);
       if (!ok) {
-        // Retry logic
         task.retries++;
         if (task.retries <= task.maxRetries) {
           console.log(`[TASK] ${task.id}: Retrying (${task.retries}/${task.maxRetries})...`);
-          i--; // Retry same task
+          i--;
           continue;
         }
         console.error(`[TASK] ${task.id}: FAILED after ${task.retries} retries`);
@@ -483,33 +342,29 @@ export class Orchestrator {
       }
     }
 
-    // Reset task index for next phase
     this.currentTaskIdx = 0;
 
-    // ── Phase-level validation (build, test, healthcheck, e2e) ──────
+    // ── Phase-level validation ──────────────────────────────────────
     if (this.config.validationEnabled !== false) {
       const phaseValidation = await runPhaseValidation(phase.id, this.cwd, this.config);
 
       if (!phaseValidation.ok) {
         const failures = phaseValidation.results.filter((r) => !r.ok);
 
-        // Handle Playwright setup if needed
         const needsE2ESetup = failures.some((r) => r.needsSetup && r.type === "e2e");
         if (needsE2ESetup) {
           console.log(`[VALIDATE] Playwright not configured — asking Claude to set it up...`);
-          const setupPrompt =
+          await this._runPrompt(
             `Install and configure Playwright for E2E testing. Run these commands:\n` +
             `npx playwright install --with-deps chromium\n` +
             `Then create playwright.config.ts with baseURL http://localhost:3000 and webServer that runs "npm run dev".\n` +
             `Create a basic smoke test in tests/e2e/smoke.spec.ts that:\n` +
             `1. Navigates to the home page and verifies it loads\n` +
             `2. Checks the login page renders a form\n` +
-            `3. Verifies the main navigation works`;
-          await this._sendPrompt(setupPrompt);
-          await this._waitForIdle();
+            `3. Verifies the main navigation works`
+          );
         }
 
-        // Send fix prompt for build/test/env failures
         const fixableFailures = failures.filter((r) => !r.needsSetup);
         if (fixableFailures.length > 0) {
           const failureReport = fixableFailures
@@ -522,14 +377,13 @@ export class Orchestrator {
             .join("\n\n---\n\n");
 
           console.log(`[VALIDATE] Phase "${phase.id}" failed validation — sending fix prompt`);
-          const fixPrompt =
+          await this._runPrompt(
             `Phase "${phase.name}" validation failed. Fix ALL issues:\n\n${failureReport}\n\n` +
-            `Make sure the build compiles cleanly, .env has real credentials, and database is accessible.`;
-          await this._sendPrompt(fixPrompt);
-          await this._waitForIdle();
+            `Make sure the build compiles cleanly, .env has real credentials, and database is accessible.`
+          );
         }
 
-        // Re-validate (one retry)
+        // Re-validate
         const maxRetries = this.config.maxValidationRetries || 1;
         for (let attempt = 0; attempt < maxRetries; attempt++) {
           const retry = await runPhaseValidation(phase.id, this.cwd, this.config);
@@ -549,8 +403,7 @@ export class Orchestrator {
                   return rpt;
                 })
                 .join("\n\n---\n\n");
-              await this._sendPrompt(`Validation still failing. Fix these remaining issues:\n\n${report}`);
-              await this._waitForIdle();
+              await this._runPrompt(`Validation still failing. Fix these remaining issues:\n\n${report}`);
             }
           } else {
             console.log(`[VALIDATE] Phase "${phase.id}" still failing after ${maxRetries} retries — continuing`);
@@ -570,7 +423,6 @@ export class Orchestrator {
       this._emit("phase_done", { phaseId: phase.id });
       console.log(`[PHASE] ${phase.id}: DONE ✓`);
     } else {
-      // Gate failed but we continue — it's informational
       phase.status = PhaseStatus.DONE;
       console.log(`[PHASE] ${phase.id}: DONE (gate check had warnings)`);
     }
@@ -584,7 +436,6 @@ export class Orchestrator {
 
     let ok = true;
 
-    // File checks
     for (const file of gate.fileChecks || []) {
       if (!existsSync(join(this.cwd, file))) {
         console.log(`[GATE] Missing file: ${file}`);
@@ -592,7 +443,6 @@ export class Orchestrator {
       }
     }
 
-    // Command checks
     for (const cmd of gate.commandChecks || []) {
       try {
         execSync(cmd, { cwd: this.cwd, stdio: "pipe", timeout: 120_000 });
@@ -613,18 +463,28 @@ export class Orchestrator {
     this.status = "running";
 
     console.log("\n╔══════════════════════════════════════════════════════════╗");
-    console.log("║           CLAUDE ORCHESTRATOR — ENGINE                  ║");
+    console.log("║       CLAUDE ORCHESTRATOR — ENGINE (headless -p)       ║");
     console.log("╚══════════════════════════════════════════════════════════╝");
     console.log(`  Project:  ${this.cwd}`);
     console.log(`  Run ID:   ${this.runId}`);
+    console.log(`  Mode:     claude -p (no PTY)`);
     console.log(`  Review:   ${this.noReview ? "DISABLED" : "ENABLED"}`);
     console.log("");
 
+    // Verify claude binary exists
     try {
-      // Initialize JSONL writer for pixel.lab reporter tracking
+      const bin = findClaudeBinary();
+      console.log(`[ORCH] Claude binary: ${bin}`);
+    } catch (e) {
+      console.error(`[ORCH] ${e.message}`);
+      this.status = "failed";
+      return;
+    }
+
+    try {
       this._initJsonlWriter();
 
-      // Phase 0: Load or build plan
+      // Load or build plan
       if (this._resume) {
         const loaded = this._loadState();
         if (!loaded) {
@@ -651,26 +511,17 @@ export class Orchestrator {
         totalTasks: this.phases.reduce((s, p) => s + p.tasks.length, 0),
       });
 
-      // Spawn Claude Code
-      this._spawnClaude();
-
-      // Wait for Claude Code to fully initialize (load UI, read CLAUDE.md, etc.)
-      console.log("[ORCH] Waiting for Claude Code to initialize...");
-      await this._sleep(10_000); // 10 seconds to let it start up
-
-      // Log what the PTY has received so far
-      const ptyOutput = this.pty.peekRecent(500);
-      console.log(`[ORCH] PTY output so far: ${ptyOutput.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "").trim().slice(0, 300)}`);
-
-      // The JSONL watcher has auto-lock enabled — it will lock to the PTY's JSONL
-      // as soon as it appears. No need to wait here; _waitForIdle handles the wait.
+      // No PTY spawn needed — each prompt is a separate claude -p invocation
+      console.log(`[ORCH] Ready to execute ${this.phases.length} phases`);
+      if (this.sessionId) {
+        console.log(`[ORCH] Continuing session: ${this.sessionId}`);
+      }
 
       // Execute phases
       for (let i = this.currentPhaseIdx; i < this.phases.length; i++) {
         this.currentPhaseIdx = i;
         this._saveState();
 
-        // Check total timeout
         if (Date.now() - this.startedAt > this.config.totalTimeout) {
           console.error("[ORCH] Total timeout reached!");
           this.status = "failed";
@@ -681,15 +532,15 @@ export class Orchestrator {
         await this._executePhase(this.phases[i], i);
       }
 
-      // Final review — done in-PTY, no separate claude -p
+      // Final review
       if (!this.noReview && this.status === "running") {
-        console.log("\n[ORCH] Running FINAL review in-PTY...");
+        console.log("\n[ORCH] Running FINAL review...");
         this._emit("final_review_start");
 
-        const finalPrompt = "Do a final review of all the work done so far. Check architecture, security, completeness. " +
-          "If you find critical issues, fix them now. Respond with a brief summary of the project status.";
-        await this._sendPrompt(finalPrompt);
-        await this._waitForIdle();
+        const finalResult = await this._runPrompt(
+          "Do a final review of all the work done so far. Check architecture, security, completeness. " +
+          "If you find critical issues, fix them now. Respond with a brief summary of the project status."
+        );
 
         this._emit("final_review_done", { score: 8, approved: true });
         console.log("[ORCH] Final review complete");
@@ -729,18 +580,13 @@ export class Orchestrator {
       this.status = "failed";
       this._emit("error", { message: e.message });
       this._saveState();
-    } finally {
-      this._killClaude();
     }
+    // No finally cleanup needed — no long-lived process to kill
   }
 
-  /**
-   * Stop the orchestrator gracefully.
-   */
   stop() {
     console.log("[ORCH] Stopping...");
     this.status = "paused";
     this._saveState();
-    this._killClaude();
   }
 }

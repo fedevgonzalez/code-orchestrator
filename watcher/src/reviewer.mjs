@@ -5,7 +5,7 @@
 import { execFileSync } from "child_process";
 import { readdirSync, unlinkSync } from "fs";
 import { join } from "path";
-import { findClaudeBinary } from "./pty.mjs";
+import { findClaudeBinary } from "./claude-cli.mjs";
 import { getJsonlDir } from "./jsonl.mjs";
 
 const REVIEW_TIMEOUT = 300_000; // 5 min

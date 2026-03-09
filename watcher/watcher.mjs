@@ -243,7 +243,7 @@ function startOrchestrator(forceResume = false) {
     onEvent: (event) => {
       pushLog(`[${event.type}] ${JSON.stringify(event).slice(0, 300)}`);
       broadcast(event);
-      // Reset restart counter on real progress — PTY survived long enough to finish a phase
+      // Reset restart counter on real progress
       if (event.type === "phase_done") {
         if (state.orchestrator.restarts > 0) {
           console.log(`[SUPERVISOR] Phase completed — resetting restart counter (was ${state.orchestrator.restarts})`);
