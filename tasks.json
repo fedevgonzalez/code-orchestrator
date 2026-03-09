@@ -1,0 +1,23 @@
+{
+  "project": "hello-demo",
+  "cwd": "./demo-project",
+  "tasks": [
+    {
+      "id": "init",
+      "prompt": "Create a simple Python project in the current directory. Create: 1) main.py with a Flask hello-world app that has routes for / (returns 'Hello World') and /health (returns JSON {\"status\": \"ok\"}), 2) requirements.txt with flask, 3) a tests/ directory with test_main.py that tests both routes using Flask's test client. Make sure all files are complete and working.",
+      "validate": "check file: main.py, requirements.txt, tests/test_main.py"
+    },
+    {
+      "id": "readme",
+      "depends_on": "init",
+      "prompt": "Create a README.md for this project. Include: project name 'Hello Demo', a brief description, how to install dependencies (pip install -r requirements.txt), how to run the app (python main.py), and how to run tests (python -m pytest tests/).",
+      "validate": "check file: README.md"
+    },
+    {
+      "id": "dockerfile",
+      "depends_on": "init",
+      "prompt": "Create a Dockerfile for this Flask app. Use python:3.12-slim as base, copy requirements.txt first and install deps, then copy the rest of the code. Expose port 5000 and set the CMD to run main.py.",
+      "validate": "check file: Dockerfile"
+    }
+  ]
+}

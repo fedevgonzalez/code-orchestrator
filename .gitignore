@@ -1,0 +1,12 @@
+node_modules/
+.env
+.env.*
+*.pid
+*.log
+logs/
+.orchestrator/
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
+*.jsonl

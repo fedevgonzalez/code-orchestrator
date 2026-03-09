@@ -1,0 +1,5 @@
+pywinpty>=2.0; sys_platform == 'win32'
+pexpect>=4.8; sys_platform != 'win32'
+pyyaml>=6.0
+rich>=13.0
+playwright>=1.40

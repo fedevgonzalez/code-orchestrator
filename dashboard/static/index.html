@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude Orchestrator — Dashboard</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'SF Mono', 'Fira Code', monospace; background: #0d1117; color: #c9d1d9; padding: 20px; }
+    h1 { color: #58a6ff; margin-bottom: 4px; font-size: 1.4em; }
+    .subtitle { color: #8b949e; font-size: 0.8em; margin-bottom: 20px; }
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+    .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 14px; }
+    .card h2 { color: #8b949e; font-size: 0.75em; text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.05em; }
+    .stat { font-size: 1.6em; font-weight: bold; }
+    .stat.ok { color: #3fb950; }
+    .stat.warn { color: #d29922; }
+    .stat.err { color: #f85149; }
+    .stat.info { color: #58a6ff; }
+
+    .controls { margin-bottom: 16px; display: flex; gap: 8px; }
+    .btn { padding: 6px 16px; border-radius: 6px; border: 1px solid #30363d; background: #21262d;
+           color: #c9d1d9; cursor: pointer; font-family: inherit; font-size: 0.8em; }
+    .btn:hover { background: #30363d; }
+    .btn.danger { border-color: #f85149; color: #f85149; }
+    .btn.danger:hover { background: #f8514922; }
+    .btn.primary { border-color: #3fb950; color: #3fb950; }
+    .btn.primary:hover { background: #3fb95022; }
+
+    .section-title { color: #8b949e; font-size: 0.85em; margin: 16px 0 8px; text-transform: uppercase; }
+
+    .log { background: #010409; border: 1px solid #30363d; border-radius: 8px; padding: 12px;
+           max-height: 400px; overflow-y: auto; font-size: 0.78em; line-height: 1.5; }
+    .log-entry { padding: 1px 0; color: #8b949e; white-space: pre-wrap; word-break: break-all; }
+    .log-entry.state { color: #58a6ff; }
+    .log-entry.error { color: #f85149; }
+    .log-entry.orch { color: #d2a8ff; }
+    .log-entry.success { color: #3fb950; }
+
+    .ws-status { position: fixed; top: 12px; right: 20px; font-size: 0.75em; display: flex; align-items: center; gap: 6px; }
+    .ws-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .ws-dot.connected { background: #3fb950; }
+    .ws-dot.disconnected { background: #f85149; }
+
+    @media (max-width: 768px) {
+      .grid { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Claude Orchestrator</h1>
+  <div class="subtitle" id="projectPath">—</div>
+
+  <div class="ws-status">
+    <div class="ws-dot disconnected" id="wsDot"></div>
+    <span id="wsText">Disconnected</span>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Agent State</h2>
+      <div class="stat" id="agentState">—</div>
+    </div>
+    <div class="card">
+      <h2>Orchestrator</h2>
+      <div class="stat" id="orchStatus">—</div>
+    </div>
+    <div class="card">
+      <h2>Restarts</h2>
+      <div class="stat" id="restarts">0</div>
+    </div>
+    <div class="card">
+      <h2>Uptime</h2>
+      <div class="stat info" id="uptime">—</div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="btn primary" onclick="restartOrch()">Restart Orchestrator</button>
+    <button class="btn danger" onclick="stopOrch()">Stop</button>
+  </div>
+
+  <div class="section-title">Live Log</div>
+  <div class="log" id="log"></div>
+
+  <script>
+    const PORT = location.port || 3111;
+    const BASE = `http://${location.hostname}:${PORT}`;
+    const WS_URL = `ws://${location.hostname}:${PORT}`;
+    let ws;
+
+    // ── WebSocket ───────────────────────────────────────────────
+    function connect() {
+      ws = new WebSocket(WS_URL);
+
+      ws.onopen = () => {
+        document.getElementById('wsDot').className = 'ws-dot connected';
+        document.getElementById('wsText').textContent = 'Connected';
+        addLog('Connected to supervisor', 'success');
+      };
+
+      ws.onclose = () => {
+        document.getElementById('wsDot').className = 'ws-dot disconnected';
+        document.getElementById('wsText').textContent = 'Reconnecting...';
+        setTimeout(connect, 3000);
+      };
+
+      ws.onmessage = (evt) => {
+        const d = JSON.parse(evt.data);
+
+        switch (d.type) {
+          case 'initial_state':
+            setAgentState(d.agent_state || 'unknown');
+            if (d.orchestrator) setOrchStatus(d.orchestrator.status, d.orchestrator.restarts);
+            if (d.project_cwd) document.getElementById('projectPath').textContent = d.project_cwd;
+            break;
+
+          case 'plan_ready':
+            addLog(`Plan ready: ${d.phases} phases, ${d.totalTasks} tasks`, 'success');
+            break;
+
+          case 'phase_start':
+            addLog(`Phase started: ${d.name} (${d.phaseId})`, 'state');
+            break;
+
+          case 'phase_done':
+            addLog(`Phase done: ${d.phaseId}`, 'success');
+            break;
+
+          case 'task_start':
+            addLog(`Task started: ${d.taskId}`, 'orch');
+            break;
+
+          case 'task_done':
+            addLog(`Task done: ${d.taskId} (score: ${d.score})`, 'success');
+            break;
+
+          case 'task_reviewed':
+            addLog(`Review: ${d.taskId} — score ${d.score}, ${d.approved ? 'APPROVED' : 'REJECTED'}`, d.approved ? 'success' : 'error');
+            break;
+
+          case 'task_timeout':
+            addLog(`Task TIMEOUT: ${d.taskId}`, 'error');
+            break;
+
+          case 'run_complete':
+            addLog(`Run complete: ${d.status} — ${d.doneTasks}/${d.totalTasks} tasks in ${Math.floor(d.elapsed/60)}m`, 'success');
+            setOrchStatus(d.status === 'completed' ? 'completed' : 'stopped');
+            break;
+
+          case 'error':
+            addLog(`ERROR: ${d.message}`, 'error');
+            break;
+
+          case 'state_change':
+            setAgentState(d.state);
+            addLog(`Agent → ${d.state}`, 'state');
+            break;
+
+          case 'turn_complete':
+            addLog(`Turn complete (${d.duration_ms}ms)`, 'success');
+            break;
+
+          case 'orchestrator_started':
+            setOrchStatus('running', d.restart);
+            addLog(`Orchestrator started (PID: ${d.pid}, restart #${d.restart})`, 'orch');
+            break;
+
+          case 'orchestrator_completed':
+            setOrchStatus('completed', null);
+            addLog('Orchestrator completed successfully!', 'success');
+            break;
+
+          case 'orchestrator_crashed':
+            setOrchStatus('crashed', d.restarts);
+            addLog(`Orchestrator CRASHED (exit: ${d.exit_code}, signal: ${d.signal})`, 'error');
+            break;
+
+          case 'orchestrator_restarting':
+            setOrchStatus('restarting', d.attempt);
+            addLog(`Restarting in ${d.in_ms / 1000}s (attempt ${d.attempt})...`, 'orch');
+            break;
+
+          case 'orchestrator_max_restarts':
+            setOrchStatus('stopped', d.restarts);
+            addLog(`Max restarts reached (${d.restarts}). Stopped.`, 'error');
+            break;
+
+          case 'orchestrator_spawn_error':
+            addLog(`Spawn error: ${d.error}`, 'error');
+            break;
+
+          case 'log':
+            addLog(d.text, d.text.includes('[ERR]') ? 'error' : 'orch');
+            break;
+
+          case 'session_start':
+            addLog(`New session: ${d.jsonl_path.split(/[\\/]/).pop()}`, 'state');
+            break;
+        }
+      };
+    }
+
+    // ── UI updates ──────────────────────────────────────────────
+    function setAgentState(s) {
+      const el = document.getElementById('agentState');
+      el.textContent = s || '—';
+      el.className = 'stat ' + ({
+        idle: 'ok', working: 'warn', responding: 'info', exited: 'err', unknown: ''
+      }[s] || '');
+    }
+
+    function setOrchStatus(s, restarts) {
+      const el = document.getElementById('orchStatus');
+      el.textContent = s || '—';
+      el.className = 'stat ' + ({
+        running: 'ok', completed: 'ok', starting: 'warn',
+        restarting: 'warn', crashed: 'err', stopped: 'err'
+      }[s] || '');
+      if (restarts !== null && restarts !== undefined) {
+        const re = document.getElementById('restarts');
+        re.textContent = restarts;
+        re.className = 'stat ' + (restarts > 0 ? 'warn' : 'ok');
+      }
+    }
+
+    function addLog(text, cls = '') {
+      const log = document.getElementById('log');
+      const entry = document.createElement('div');
+      entry.className = 'log-entry ' + cls;
+      const time = new Date().toLocaleTimeString();
+      entry.textContent = `[${time}] ${text}`;
+      log.appendChild(entry);
+      log.scrollTop = log.scrollHeight;
+      while (log.children.length > 500) log.removeChild(log.firstChild);
+    }
+
+    // ── Health polling ──────────────────────────────────────────
+    async function pollHealth() {
+      try {
+        const res = await fetch(`${BASE}/health`);
+        const d = await res.json();
+        document.getElementById('uptime').textContent = formatDuration(d.uptime_s);
+        setOrchStatus(d.orchestrator_status, d.orchestrator_restarts);
+      } catch {}
+    }
+
+    function formatDuration(s) {
+      const h = Math.floor(s / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      if (h > 0) return `${h}h ${m}m`;
+      return `${m}m ${s % 60}s`;
+    }
+
+    // ── Controls ────────────────────────────────────────────────
+    async function restartOrch() {
+      if (!confirm('Restart orchestrator?')) return;
+      await fetch(`${BASE}/restart`, { method: 'POST' });
+      addLog('Manual restart requested', 'orch');
+    }
+
+    async function stopOrch() {
+      if (!confirm('Stop orchestrator?')) return;
+      await fetch(`${BASE}/stop`, { method: 'POST' });
+      addLog('Manual stop requested', 'error');
+    }
+
+    // ── Init ────────────────────────────────────────────────────
+    connect();
+    setInterval(pollHealth, 5000);
+    pollHealth();
+  </script>
+</body>
+</html>

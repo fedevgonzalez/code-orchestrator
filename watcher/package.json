@@ -1,0 +1,22 @@
+{
+  "name": "claude-orchestrator",
+  "version": "2.0.0",
+  "description": "Autonomous dual-agent SaaS builder — spawns Claude Code, reviews, validates, repeats",
+  "main": "watcher.mjs",
+  "type": "module",
+  "bin": {
+    "claude-orch": "./cli.mjs"
+  },
+  "scripts": {
+    "start": "node cli.mjs",
+    "logs": "node cli.mjs --logs",
+    "stop": "node cli.mjs --stop",
+    "status": "node cli.mjs --status"
+  },
+  "dependencies": {
+    "node-pty": "^1.0.0",
+    "ws": "^8.16.0",
+    "chokidar": "^3.6.0",
+    "which": "^4.0.0"
+  }
+}
