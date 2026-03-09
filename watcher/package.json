@@ -14,9 +14,10 @@
     "status": "node cli.mjs --status"
   },
   "dependencies": {
-    "node-pty": "^1.0.0",
-    "ws": "^8.16.0",
     "chokidar": "^3.6.0",
-    "which": "^4.0.0"
+    "node-pty": "^1.0.0",
+    "pg": "^8.20.0",
+    "which": "^4.0.0",
+    "ws": "^8.16.0"
   }
 }

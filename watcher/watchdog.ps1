@@ -4,6 +4,7 @@
 # Runs fully hidden via watchdog.vbs wrapper.
 #
 # Uses a PID lockfile instead of PM2 queries to avoid daemon mismatch issues.
+# Reads dev-port from checkpoint config if available.
 
 $ErrorActionPreference = "SilentlyContinue"
 
@@ -49,9 +50,18 @@ foreach ($proj in $projects) {
         $logFile = Join-Path $watcherDir "watchdog.log"
         Add-Content $logFile "[$timestamp] Relaunching $name (pid not alive, checkpoint=$status)"
 
+        # Read dev-port from config if saved
+        $devPortFile = Join-Path $proj.FullName ".orchestrator\dev-port"
+        $devPortArg = ""
+        if (Test-Path $devPortFile) {
+            $devPort = (Get-Content $devPortFile -Raw).Trim()
+            $devPortArg = "--dev-port $devPort"
+        }
+
         # Clean up stale PM2 entry and relaunch
         pm2 delete $name 2>$null
-        node cli.mjs --resume $proj.FullName
+        $cmd = "node cli.mjs --resume `"$($proj.FullName)`" $devPortArg"
+        Invoke-Expression $cmd
         Start-Sleep -Seconds 3
     }
 }

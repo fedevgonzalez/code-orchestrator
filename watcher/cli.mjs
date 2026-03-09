@@ -108,6 +108,7 @@ if (!specArg) {
 
   Start:
     node cli.mjs <spec.md>                 Build project from spec
+    node cli.mjs <spec.md> --dev-port 3001 Custom dev server port
     node cli.mjs --resume <project-dir>    Resume from checkpoint
 
   Monitor:
@@ -145,10 +146,14 @@ function startDaemon(cwd, specPath, resume) {
   const watcherScript = resolve(__dirname, "watcher.mjs");
   const name = instanceName(cwd);
 
-  // Each project gets its own port: hash the name to a port 3111-3199
+  // Each project gets its own dashboard port: hash the name to a port 3111-3199
   const port = 3111 + Math.abs(simpleHash(name)) % 89;
 
-  let watcherArgs = `--cwd "${cwd}" --port ${port} --verbose`;
+  // Dev server port: use --dev-port if provided, otherwise assign based on hash
+  const devPortArg = getArgAfter("--dev-port");
+  const devPort = devPortArg ? parseInt(devPortArg, 10) : 3000 + Math.abs(simpleHash(name)) % 100;
+
+  let watcherArgs = `--cwd "${cwd}" --port ${port} --dev-port ${devPort} --verbose`;
   if (resume) {
     watcherArgs += " --resume";
   } else {
@@ -171,6 +176,7 @@ function startDaemon(cwd, specPath, resume) {
   if (specPath) console.log(`  Spec:      ${specPath}`);
   if (resume) console.log(`  Mode:      RESUME from checkpoint`);
   console.log(`  Dashboard: http://localhost:${port}`);
+  console.log(`  Dev port:  ${devPort}`);
   console.log("");
 
   run(pm2Cmd);

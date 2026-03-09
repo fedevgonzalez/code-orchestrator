@@ -30,6 +30,7 @@ const { values: args } = parseArgs({
   options: {
     cwd: { type: "string", default: "." },
     port: { type: "string", default: "3111" },
+    "dev-port": { type: "string", default: "3000" },
     verbose: { type: "boolean", default: false },
     spec: { type: "string" },
     resume: { type: "boolean", default: false },
@@ -40,6 +41,7 @@ const { values: args } = parseArgs({
 
 const PROJECT_CWD = resolve(args.cwd);
 const PORT = parseInt(args.port, 10);
+const DEV_PORT = parseInt(args["dev-port"], 10);
 const VERBOSE = args.verbose;
 const MAX_RESTARTS = parseInt(args["max-restarts"], 10);
 
@@ -219,10 +221,11 @@ function startOrchestrator(forceResume = false) {
   state.orchestrator.status = "running";
   state.orchestrator.startedAt = Date.now();
 
-  // Write PID file for watchdog (avoids PM2 daemon mismatch)
+  // Write PID file and dev-port for watchdog (avoids PM2 daemon mismatch)
   const pidDir = join(PROJECT_CWD, ".orchestrator");
   mkdirSync(pidDir, { recursive: true });
   writeFileSync(join(pidDir, "orchestrator.pid"), String(process.pid), "utf-8");
+  writeFileSync(join(pidDir, "dev-port"), String(DEV_PORT), "utf-8");
 
   broadcast({
     type: "orchestrator_started",
@@ -236,6 +239,7 @@ function startOrchestrator(forceResume = false) {
     resume: isResume,
     noReview: args["no-review"],
     verbose: VERBOSE,
+    config: { devServerPort: DEV_PORT },
     onEvent: (event) => {
       pushLog(`[${event.type}] ${JSON.stringify(event).slice(0, 300)}`);
       broadcast(event);
@@ -304,6 +308,7 @@ console.log("│          CLAUDE ORCHESTRATOR v2 — Node.js                │"
 console.log("└──────────────────────────────────────────────────────────┘");
 console.log(`  Project:      ${PROJECT_CWD}`);
 console.log(`  Dashboard:    http://localhost:${PORT}`);
+console.log(`  Dev server:   port ${DEV_PORT}`);
 console.log(`  Max restarts: ${MAX_RESTARTS}`);
 console.log(`  Review:       ${args["no-review"] ? "DISABLED" : "ENABLED"}`);
 console.log("");
