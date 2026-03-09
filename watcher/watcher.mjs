@@ -35,7 +35,7 @@ const { values: args } = parseArgs({
     spec: { type: "string" },
     resume: { type: "boolean", default: false },
     "no-review": { type: "boolean", default: false },
-    "max-restarts": { type: "string", default: "5" },
+    "max-restarts": { type: "string", default: "50" },
   },
 });
 
@@ -243,6 +243,13 @@ function startOrchestrator(forceResume = false) {
     onEvent: (event) => {
       pushLog(`[${event.type}] ${JSON.stringify(event).slice(0, 300)}`);
       broadcast(event);
+      // Reset restart counter on real progress — PTY survived long enough to finish a phase
+      if (event.type === "phase_done") {
+        if (state.orchestrator.restarts > 0) {
+          console.log(`[SUPERVISOR] Phase completed — resetting restart counter (was ${state.orchestrator.restarts})`);
+          state.orchestrator.restarts = 0;
+        }
+      }
     },
   });
 
