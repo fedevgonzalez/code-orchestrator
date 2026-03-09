@@ -206,18 +206,22 @@ wss.on("connection", (ws) => {
 let currentOrchestrator = null;
 
 function startOrchestrator(forceResume = false) {
-  const isResume = forceResume || args.resume || state.orchestrator.restarts > 0;
+  const hasPrompt = !!args.prompt;
+  const isNonBuildMode = args.mode && args.mode !== "build";
+
+  // For non-build modes with a prompt, don't auto-resume old checkpoint
+  const isResume = !hasPrompt && (forceResume || args.resume || state.orchestrator.restarts > 0);
   const specPath = !isResume && args.spec ? resolve(args.spec) : undefined;
 
-  if (!isResume && !specPath) {
-    // Check if checkpoint exists for implicit resume
+  if (!isResume && !specPath && !hasPrompt && !isNonBuildMode) {
+    // Check if checkpoint exists for implicit resume (build mode only)
     const cpPath = join(PROJECT_CWD, ".orchestrator", "checkpoint.json");
     if (existsSync(cpPath)) {
       return startOrchestrator(true);
     }
     console.log(
-      "[SUPERVISOR] No --spec provided and no checkpoint found.\n" +
-      "             Use POST /restart or re-run with --spec to start."
+      "[SUPERVISOR] No --spec, --prompt, or checkpoint found.\n" +
+      "             Use a command like: feature, fix, audit, test, review, refactor, exec"
     );
     return;
   }
@@ -354,10 +358,10 @@ httpServer.listen(PORT, () => {
   console.log(`        WebSocket: ws://localhost:${PORT}`);
   console.log("");
 
-  if (args.spec || args.resume) {
+  if (args.spec || args.resume || args.prompt) {
     startOrchestrator();
   } else {
-    // Try auto-resume from checkpoint
+    // Try auto-resume from checkpoint (build mode only)
     const cpPath = join(PROJECT_CWD, ".orchestrator", "checkpoint.json");
     if (existsSync(cpPath)) {
       console.log("[SUPERVISOR] Found checkpoint, auto-resuming...");
