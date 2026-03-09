@@ -15,7 +15,7 @@
  */
 
 import { resolve, dirname, basename } from "path";
-import { existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { execSync } from "child_process";
 import { fileURLToPath } from "url";
 
@@ -149,9 +149,19 @@ function startDaemon(cwd, specPath, resume) {
   // Each project gets its own dashboard port: hash the name to a port 3111-3199
   const port = 3111 + Math.abs(simpleHash(name)) % 89;
 
-  // Dev server port: use --dev-port if provided, otherwise assign based on hash
+  // Dev server port: use --dev-port if provided, then try saved dev-port file, fallback to hash
   const devPortArg = getArgAfter("--dev-port");
-  const devPort = devPortArg ? parseInt(devPortArg, 10) : 3000 + Math.abs(simpleHash(name)) % 100;
+  let devPort;
+  if (devPortArg) {
+    devPort = parseInt(devPortArg, 10);
+  } else {
+    const savedPortFile = resolve(cwd, ".orchestrator", "dev-port");
+    if (existsSync(savedPortFile)) {
+      devPort = parseInt(readFileSync(savedPortFile, "utf-8").trim(), 10);
+    } else {
+      devPort = 3000 + Math.abs(simpleHash(name)) % 100;
+    }
+  }
 
   let watcherArgs = `--cwd "${cwd}" --port ${port} --dev-port ${devPort} --verbose`;
   if (resume) {

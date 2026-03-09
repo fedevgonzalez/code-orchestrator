@@ -503,17 +503,22 @@ export class Orchestrator {
           await this._waitForIdle();
         }
 
-        // Send fix prompt for build/test failures
+        // Send fix prompt for build/test/env failures
         const fixableFailures = failures.filter((r) => !r.needsSetup);
         if (fixableFailures.length > 0) {
           const failureReport = fixableFailures
-            .map((r) => `${r.type.toUpperCase()}: ${r.message}\n${r.output?.slice(-1500) || ""}`)
-            .join("\n\n");
+            .map((r) => {
+              let report = `${r.type.toUpperCase()}: ${r.message}`;
+              if (r.fixPrompt) report += `\n\nHOW TO FIX:\n${r.fixPrompt}`;
+              if (r.output) report += `\n\nOUTPUT:\n${r.output.slice(-1500)}`;
+              return report;
+            })
+            .join("\n\n---\n\n");
 
           console.log(`[VALIDATE] Phase "${phase.id}" failed validation — sending fix prompt`);
           const fixPrompt =
             `Phase "${phase.name}" validation failed. Fix ALL issues:\n\n${failureReport}\n\n` +
-            `Make sure the build compiles cleanly and all tests pass.`;
+            `Make sure the build compiles cleanly, .env has real credentials, and database is accessible.`;
           await this._sendPrompt(fixPrompt);
           await this._waitForIdle();
         }
@@ -531,8 +536,13 @@ export class Orchestrator {
             const retryFailures = retry.results.filter((r) => !r.ok && !r.needsSetup);
             if (retryFailures.length > 0) {
               const report = retryFailures
-                .map((r) => `${r.type.toUpperCase()}: ${r.message}\n${r.output?.slice(-1500) || ""}`)
-                .join("\n\n");
+                .map((r) => {
+                  let rpt = `${r.type.toUpperCase()}: ${r.message}`;
+                  if (r.fixPrompt) rpt += `\n\nHOW TO FIX:\n${r.fixPrompt}`;
+                  if (r.output) rpt += `\n\nOUTPUT:\n${r.output.slice(-1500)}`;
+                  return rpt;
+                })
+                .join("\n\n---\n\n");
               await this._sendPrompt(`Validation still failing. Fix these remaining issues:\n\n${report}`);
               await this._waitForIdle();
             }

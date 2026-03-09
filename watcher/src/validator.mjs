@@ -106,9 +106,9 @@ function checkServer(validation, cwd) {
  * Defines which validators run after each phase completes.
  */
 const PHASE_VALIDATORS = {
-  "scaffold":      ["build"],
-  "database":      ["build"],
-  "auth":          ["build"],
+  "scaffold":      ["env-check", "build"],
+  "database":      ["env-check", "db-connect", "build"],
+  "auth":          ["env-check", "db-connect", "build"],
   "core-api":      ["build"],
   "payments":      ["build"],
   "frontend":      ["build"],
@@ -118,8 +118,8 @@ const PHASE_VALIDATORS = {
   "nextspark-polish": ["build"],
   "seed-data":     ["build"],
   "landing":       ["build"],
-  "seo":           ["build"],
-  "legal":         ["build"],
+  "seo":           ["build", "seo-files"],
+  "legal":         ["build", "legal-files"],
   "email":         ["build"],
   "analytics":     ["build"],
   "security":      ["build"],
@@ -155,6 +155,12 @@ export async function runPhaseValidation(phaseId, cwd, config = {}) {
   for (const v of validators) {
     let result;
     switch (v) {
+      case "env-check":
+        result = checkEnvFile(cwd);
+        break;
+      case "db-connect":
+        result = await checkDbConnection(cwd);
+        break;
       case "build":
         result = runBuild(cwd, config);
         break;
@@ -178,6 +184,12 @@ export async function runPhaseValidation(phaseId, cwd, config = {}) {
         break;
       case "cicd-files":
         result = checkCicdFiles(cwd);
+        break;
+      case "seo-files":
+        result = checkSeoFiles(cwd);
+        break;
+      case "legal-files":
+        result = checkLegalFiles(cwd);
         break;
       default:
         result = { type: v, ok: true, message: `Unknown validator: ${v}` };
@@ -628,6 +640,194 @@ function checkCicdFiles(cwd) {
     return { type: "cicd-files", ok: true, message: `CI/CD files present: ${found.join(", ")}` };
   }
   return { type: "cicd-files", ok: false, message: `Missing CI/CD files: ${missing.join(", ")}` };
+}
+
+// ── Env File Validation ───────────────────────────────────────────
+
+/**
+ * Validate that .env has real credentials, not placeholders.
+ * Checks DATABASE_URL and BETTER_AUTH_SECRET specifically.
+ */
+function checkEnvFile(cwd) {
+  const envPath = join(cwd, ".env");
+  if (!existsSync(envPath)) {
+    return { type: "env-check", ok: false, message: "No .env file found" };
+  }
+
+  const content = readFileSync(envPath, "utf-8");
+  const issues = [];
+
+  // Check DATABASE_URL
+  const dbMatch = content.match(/DATABASE_URL="?([^"\n]+)"?/);
+  if (!dbMatch) {
+    issues.push("DATABASE_URL not set");
+  } else {
+    const dbUrl = dbMatch[1];
+    if (dbUrl.includes("user:password") || dbUrl.includes("username:password")) {
+      issues.push("DATABASE_URL has placeholder credentials (user:password)");
+    }
+    if (dbUrl.includes("localhost") && !dbUrl.includes("postgres.lab")) {
+      issues.push("DATABASE_URL points to localhost instead of postgres.lab");
+    }
+    if (dbUrl.includes("neon.tech") || dbUrl.includes("supabase") || dbUrl.includes("planetscale")) {
+      issues.push("DATABASE_URL points to external provider instead of postgres.lab");
+    }
+  }
+
+  // Check BETTER_AUTH_SECRET
+  const authMatch = content.match(/BETTER_AUTH_SECRET="?([^"\n]+)"?/);
+  if (authMatch) {
+    const secret = authMatch[1];
+    if (secret === "your-secret-key-here" || secret.includes("your-") || secret.includes("change-me")) {
+      issues.push("BETTER_AUTH_SECRET is a placeholder — must be generated (openssl rand -base64 32)");
+    }
+  }
+
+  if (issues.length > 0) {
+    return {
+      type: "env-check",
+      ok: false,
+      message: `Env issues: ${issues.join("; ")}`,
+      fixPrompt: buildEnvFixPrompt(issues, cwd),
+    };
+  }
+
+  return { type: "env-check", ok: true, message: "Env file has valid credentials" };
+}
+
+/**
+ * Build a prompt that tells Claude exactly how to fix the .env
+ */
+function buildEnvFixPrompt(issues, cwd) {
+  const lines = ["Fix the .env file. The following issues were detected:\n"];
+  for (const issue of issues) {
+    lines.push(`- ${issue}`);
+  }
+  lines.push("\nREQUIRED VALUES:");
+  lines.push('- DATABASE_URL must be: postgresql://dbuser:dbpass_SecurePassword123@postgres.lab:5432/{project_name}?sslmode=disable');
+  lines.push('- BETTER_AUTH_SECRET must be a real random secret. Generate one with: openssl rand -base64 32');
+  lines.push("- Do NOT use placeholders, localhost, or external providers (neon, supabase, etc)");
+  lines.push("\nUpdate the .env file NOW with the correct values.");
+  return lines.join("\n");
+}
+
+// ── Database Connection Check ─────────────────────────────────────
+
+/**
+ * Try to connect to the database using the DATABASE_URL from .env.
+ * Uses a simple TCP connection check to postgres port, then tries
+ * a real query via node-postgres if available.
+ */
+async function checkDbConnection(cwd) {
+  const envPath = join(cwd, ".env");
+  if (!existsSync(envPath)) {
+    return { type: "db-connect", ok: false, message: "No .env file — cannot check DB" };
+  }
+
+  const content = readFileSync(envPath, "utf-8");
+  const dbMatch = content.match(/DATABASE_URL="?([^"\n]+)"?/);
+  if (!dbMatch) {
+    return { type: "db-connect", ok: false, message: "DATABASE_URL not found in .env" };
+  }
+
+  const dbUrl = dbMatch[1];
+
+  // Parse host and port from DATABASE_URL
+  let host, port;
+  try {
+    const url = new URL(dbUrl);
+    host = url.hostname;
+    port = parseInt(url.port) || 5432;
+  } catch {
+    return { type: "db-connect", ok: false, message: `Invalid DATABASE_URL format: ${dbUrl.slice(0, 50)}...` };
+  }
+
+  // TCP connection check
+  console.log(`[VALIDATE] Checking DB connection to ${host}:${port}...`);
+
+  const tcpOk = await new Promise((resolve) => {
+    const sock = createConnection({ host, port });
+    const timeout = setTimeout(() => { sock.destroy(); resolve(false); }, 5000);
+    sock.on("connect", () => { clearTimeout(timeout); sock.destroy(); resolve(true); });
+    sock.on("error", () => { clearTimeout(timeout); sock.destroy(); resolve(false); });
+  });
+
+  if (!tcpOk) {
+    return {
+      type: "db-connect",
+      ok: false,
+      message: `Cannot reach database at ${host}:${port}`,
+      fixPrompt: `The database at ${host}:${port} is not reachable. Check that:\n1. postgres.lab is in the hosts file (192.168.68.100 postgres.lab)\n2. PostgreSQL is running on that host\n3. Port 5432 is accessible\n\nUpdate DATABASE_URL in .env to point to a reachable PostgreSQL instance.`,
+    };
+  }
+
+  // Try a real connection via drizzle-kit or psql to verify auth works
+  try {
+    execSync(`node -e "const{Client}=require('pg');(async()=>{const c=new Client({connectionString:'${dbUrl.replace(/'/g, "\\'")}',connectionTimeoutMillis:5000});await c.connect();await c.query('SELECT 1');await c.end();console.log('OK')})()"`, {
+      cwd,
+      stdio: "pipe",
+      timeout: 10_000,
+      encoding: "utf-8",
+    });
+    return { type: "db-connect", ok: true, message: `Database connected successfully (${host}:${port})` };
+  } catch (e) {
+    // pg might not be installed in the project yet — TCP was fine, so partial pass
+    if (e.message?.includes("Cannot find module")) {
+      return { type: "db-connect", ok: true, message: `Database reachable at ${host}:${port} (pg module not yet installed for full auth check)` };
+    }
+    const errMsg = (e.stderr || e.message || "").slice(-200);
+    return {
+      type: "db-connect",
+      ok: false,
+      message: `Database TCP reachable but auth/query failed: ${errMsg}`,
+      fixPrompt: `Database at ${host}:${port} is reachable but the connection failed. Check credentials in DATABASE_URL. Expected format: postgresql://dbuser:dbpass_SecurePassword123@postgres.lab:5432/{db_name}?sslmode=disable`,
+    };
+  }
+}
+
+// ── SEO Files Check ───────────────────────────────────────────────
+
+function checkSeoFiles(cwd) {
+  const checks = [
+    { path: "app/robots.ts", alt: "public/robots.txt" },
+    { path: "app/sitemap.ts", alt: "public/sitemap.xml" },
+    { path: "app/manifest.ts", alt: "public/manifest.json" },
+  ];
+
+  const missing = [];
+  for (const c of checks) {
+    if (!existsSync(join(cwd, c.path)) && !existsSync(join(cwd, c.alt))) {
+      missing.push(c.path);
+    }
+  }
+
+  if (missing.length === 0) {
+    return { type: "seo-files", ok: true, message: "SEO files present (robots, sitemap, manifest)" };
+  }
+  return { type: "seo-files", ok: false, message: `Missing SEO files: ${missing.join(", ")}` };
+}
+
+// ── Legal Files Check ─────────────────────────────────────────────
+
+function checkLegalFiles(cwd) {
+  // Check for legal pages in various possible locations
+  const possiblePaths = [
+    ["app/(public)/terms/page.tsx", "app/(public)/legal/terms/page.tsx", "app/terms/page.tsx"],
+    ["app/(public)/privacy/page.tsx", "app/(public)/legal/privacy/page.tsx", "app/privacy/page.tsx"],
+  ];
+
+  const labels = ["Terms of Service", "Privacy Policy"];
+  const missing = [];
+
+  for (let i = 0; i < possiblePaths.length; i++) {
+    const found = possiblePaths[i].some((p) => existsSync(join(cwd, p)));
+    if (!found) missing.push(labels[i]);
+  }
+
+  if (missing.length === 0) {
+    return { type: "legal-files", ok: true, message: "Legal pages present (terms, privacy)" };
+  }
+  return { type: "legal-files", ok: false, message: `Missing legal pages: ${missing.join(", ")}` };
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────

@@ -210,7 +210,17 @@ Available plugins are at G:/GitHub/nextspark/repo/plugins/. Install by copying t
 
 5. **langchain** (install if spec mentions advanced AI workflows, RAG, or embeddings): LangChain integration.
 
-**scaffold**: Initialize the project. If using nextspark, run "npx create-nextspark-app" — this AUTO-GENERATES: auth pages (login, signup, forgot-password, reset-password, verify-email), dashboard scaffold, superadmin panel, devtools, plugin system, theme system, better-auth config, Drizzle ORM setup, permissions system, i18n, .claude/skills, .claude/agents, and all the base structure. DO NOT recreate any of these — they already exist after scaffold. Only configure: DATABASE_URL in .env pointing to postgres.lab, and any project-specific env vars. The remaining phases should ONLY create business-specific entities, pages, and logic ON TOP of what nextspark already provides. Install drizzle-orm and pg. Create the database on postgres.lab by running: PGPASSWORD=dbpass_SecurePassword123 psql -h postgres.lab -U dbuser -c "CREATE DATABASE IF NOT EXISTS ${projectName};" — if CREATE DATABASE IF NOT EXISTS is not supported, use: psql -h postgres.lab -U dbuser -tc "SELECT 1 FROM pg_database WHERE datname = '${projectName}'" | grep -q 1 || psql -h postgres.lab -U dbuser -c "CREATE DATABASE ${projectName};"
+**scaffold**: Initialize the project. If using nextspark, run "npx create-nextspark-app" — this AUTO-GENERATES: auth pages (login, signup, forgot-password, reset-password, verify-email), dashboard scaffold, superadmin panel, devtools, plugin system, theme system, better-auth config, Drizzle ORM setup, permissions system, i18n, .claude/skills, .claude/agents, and all the base structure. DO NOT recreate any of these — they already exist after scaffold.
+
+CRITICAL — .env configuration (THIS WILL BE VALIDATED AUTOMATICALLY):
+After scaffolding, you MUST update the .env file with these EXACT values:
+1. DATABASE_URL="postgresql://dbuser:dbpass_SecurePassword123@postgres.lab:5432/${projectName}?sslmode=disable"
+2. BETTER_AUTH_SECRET — generate a real secret by running: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))" and paste the output as the value
+3. Do NOT leave any placeholder values like "your-secret-key-here", "user:password", "sk_test_...", etc.
+4. Do NOT use localhost, neon.tech, supabase, or any other database provider — ONLY postgres.lab
+The .env will be automatically validated after this phase. If it has placeholders or wrong credentials, the phase will FAIL and you will be asked to fix it.
+
+Also install drizzle-orm and pg. Create the database on postgres.lab by running: PGPASSWORD=dbpass_SecurePassword123 psql -h postgres.lab -U dbuser -c "CREATE DATABASE ${projectName};" 2>/dev/null || echo "DB may already exist"
 
 **database**: If using nextspark, Drizzle ORM is already configured — only CREATE the business-specific entity schemas (e.g., cars, reservations, payments) following the nextspark entity-system skill conventions. Generate migrations and push to postgres.lab with "npx drizzle-kit push". Verify tables exist. If NOT using nextspark, set up Drizzle from scratch with ALL schemas.
 
