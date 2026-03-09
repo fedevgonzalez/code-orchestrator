@@ -8,6 +8,7 @@ import which from "which";
 import { platform, homedir } from "os";
 import { join } from "path";
 import { existsSync } from "fs";
+import { execSync } from "child_process";
 
 /**
  * Find the claude CLI binary.
@@ -153,9 +154,18 @@ export class ClaudePTY {
    */
   kill() {
     if (this._pty) {
+      const pid = this._pty.pid;
       try {
         this._pty.kill();
       } catch {}
+      // On Windows, node-pty.kill() doesn't reliably kill child processes.
+      // Use taskkill to force-kill the entire process tree.
+      if (pid && platform() === "win32") {
+        try {
+          execSync(`taskkill /PID ${pid} /T /F`, { stdio: "ignore", timeout: 5000 });
+          console.log(`[PTY] Force-killed process tree (PID ${pid})`);
+        } catch {}
+      }
       this._pty = null;
     }
     this._alive = false;
