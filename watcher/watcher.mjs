@@ -33,6 +33,10 @@ const { values: args } = parseArgs({
     "dev-port": { type: "string", default: "3000" },
     verbose: { type: "boolean", default: false },
     spec: { type: "string" },
+    mode: { type: "string", default: "build" },
+    prompt: { type: "string" },
+    "audit-type": { type: "string" },
+    fix: { type: "boolean", default: false },
     resume: { type: "boolean", default: false },
     "no-review": { type: "boolean", default: false },
     "max-restarts": { type: "string", default: "50" },
@@ -236,6 +240,12 @@ function startOrchestrator(forceResume = false) {
   currentOrchestrator = new Orchestrator({
     cwd: PROJECT_CWD,
     specPath,
+    mode: args.mode || "build",
+    prompt: args.prompt || null,
+    flags: {
+      type: args["audit-type"] || undefined,
+      fix: args.fix || undefined,
+    },
     resume: isResume,
     noReview: args["no-review"],
     verbose: VERBOSE,
@@ -331,6 +341,8 @@ console.log("┌─────────────────────�
 console.log("│          CLAUDE ORCHESTRATOR v2 — Node.js                │");
 console.log("└──────────────────────────────────────────────────────────┘");
 console.log(`  Project:      ${PROJECT_CWD}`);
+console.log(`  Mode:         ${args.mode || "build"}`);
+if (args.prompt) console.log(`  Prompt:       ${args.prompt.slice(0, 60)}${args.prompt.length > 60 ? "..." : ""}`);
 console.log(`  Dashboard:    http://localhost:${PORT}`);
 console.log(`  Dev server:   port ${DEV_PORT}`);
 console.log(`  Max restarts: ${MAX_RESTARTS}`);

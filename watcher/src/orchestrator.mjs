@@ -1,20 +1,26 @@
 /**
- * Orchestrator Engine — The main build→validate→review→fix loop.
+ * Orchestrator Engine — Multi-mode execution engine.
  *
  * Drives Claude Code through phased execution using headless `-p` mode:
- *   1. For each phase: run tasks sequentially via `claude -p`
- *   2. Each task: send prompt → get result → validate → review → fix if needed
- *   3. Session continuity via `--resume <sessionId>`
- *   4. Gate check between phases
- *   5. Final review at the end
- *   6. Checkpoint after every task for crash recovery
+ *   1. Analyze codebase + request (for non-build modes)
+ *   2. Generate execution plan (phases + tasks)
+ *   3. For each phase: run tasks sequentially via `claude -p`
+ *   4. Each task: send prompt → get result → validate → review → fix if needed
+ *   5. Session continuity via `--resume <sessionId>`
+ *   6. Gate check between phases
+ *   7. Final review at the end
+ *   8. Checkpoint after every task for crash recovery
+ *
+ * Modes: build, feature, fix, audit, test, review, refactor, exec
  */
 
 import { runClaudePrompt, findClaudeBinary } from "./claude-cli.mjs";
 import { runValidation, runPhaseValidation, runPlaywrightTests } from "./validator.mjs";
 import { buildPlanFromSpec } from "./spec.mjs";
+import { analyze } from "./analyzer.mjs";
+import { createMode } from "./planner.mjs";
 import { saveCheckpoint, loadCheckpoint, checkpointPath } from "./checkpoint.mjs";
-import { TaskStatus, PhaseStatus, DEFAULT_CONFIG } from "./models.mjs";
+import { TaskStatus, PhaseStatus, DEFAULT_CONFIG, OrchestratorMode } from "./models.mjs";
 import { getJsonlDir } from "./jsonl.mjs";
 import { existsSync, mkdirSync, appendFileSync } from "fs";
 import { join, basename } from "path";
@@ -28,7 +34,10 @@ export class Orchestrator {
   /**
    * @param {object} opts
    * @param {string} opts.cwd - Project working directory
-   * @param {string} [opts.specPath] - Path to spec file
+   * @param {string} [opts.specPath] - Path to spec file (build mode)
+   * @param {string} [opts.mode] - Orchestrator mode (build, feature, fix, etc.)
+   * @param {string} [opts.prompt] - User prompt (non-build modes)
+   * @param {object} [opts.flags] - Extra flags (e.g., { type: "security", fix: true })
    * @param {boolean} [opts.resume] - Resume from checkpoint
    * @param {boolean} [opts.noReview] - Skip code reviews
    * @param {boolean} [opts.verbose] - Verbose logging
@@ -38,10 +47,16 @@ export class Orchestrator {
   constructor(opts) {
     this.cwd = opts.cwd;
     this.specPath = opts.specPath;
+    this.mode = opts.mode || OrchestratorMode.BUILD;
+    this.prompt = opts.prompt || null;
+    this.flags = opts.flags || {};
     this.noReview = opts.noReview || false;
     this.verbose = opts.verbose || false;
     this.config = { ...DEFAULT_CONFIG, ...opts.config };
     this.onEvent = opts.onEvent || (() => {});
+
+    // Mode instance (set during plan generation)
+    this._modeInstance = null;
 
     // State
     this.runId = `run-${Date.now()}`;
@@ -125,6 +140,9 @@ export class Orchestrator {
   _saveState() {
     const state = {
       runId: this.runId,
+      mode: this.mode,
+      prompt: this.prompt,
+      flags: this.flags,
       status: this.status,
       phases: this.phases,
       specText: this.specText.slice(0, 2000),
@@ -143,6 +161,9 @@ export class Orchestrator {
     if (!state) return false;
 
     this.runId = state.runId;
+    this.mode = state.mode || OrchestratorMode.BUILD;
+    this.prompt = state.prompt || this.prompt;
+    this.flags = state.flags || this.flags;
     this.phases = state.phases || [];
     this.specText = state.specText || "";
     this.analysis = state.analysis;
@@ -153,7 +174,16 @@ export class Orchestrator {
     this.sessionId = state.sessionId || null;
     this._firstCall = !this.sessionId;
 
-    console.log(`[ORCH] Resumed: phase ${this.currentPhaseIdx}, task ${this.currentTaskIdx}`);
+    // Reconstruct mode instance for validation
+    if (this.mode !== OrchestratorMode.BUILD) {
+      try {
+        this._modeInstance = createMode(this.mode, {
+          cwd: this.cwd, prompt: this.prompt, flags: this.flags,
+        });
+      } catch {}
+    }
+
+    console.log(`[ORCH] Resumed: mode=${this.mode}, phase ${this.currentPhaseIdx}, task ${this.currentTaskIdx}`);
     if (this.sessionId) {
       console.log(`[ORCH] Resuming Claude session: ${this.sessionId}`);
     }
@@ -462,13 +492,17 @@ export class Orchestrator {
     this.startedAt = Date.now();
     this.status = "running";
 
+    const modeLabel = this.mode === OrchestratorMode.BUILD ? "build (from spec)" : this.mode;
+
     console.log("\n╔══════════════════════════════════════════════════════════╗");
     console.log("║       CLAUDE ORCHESTRATOR — ENGINE (headless -p)       ║");
     console.log("╚══════════════════════════════════════════════════════════╝");
     console.log(`  Project:  ${this.cwd}`);
     console.log(`  Run ID:   ${this.runId}`);
-    console.log(`  Mode:     claude -p (no PTY)`);
+    console.log(`  Mode:     ${modeLabel}`);
+    console.log(`  Engine:   claude -p (no PTY)`);
     console.log(`  Review:   ${this.noReview ? "DISABLED" : "ENABLED"}`);
+    if (this.prompt) console.log(`  Prompt:   ${this.prompt.slice(0, 80)}${this.prompt.length > 80 ? "..." : ""}`);
     console.log("");
 
     // Verify claude binary exists
@@ -493,15 +527,47 @@ export class Orchestrator {
           return;
         }
         this.status = "running";
-      } else if (this.specPath) {
+      } else if (this.mode === OrchestratorMode.BUILD && this.specPath) {
+        // Legacy build mode — use existing spec pipeline
         console.log("[ORCH] Building plan from spec...");
         const plan = buildPlanFromSpec(this.specPath, this.cwd);
         this.phases = plan.phases;
         this.specText = plan.specText;
         this.analysis = plan.analysis;
         this._saveState();
+      } else if (this.prompt || this.mode !== OrchestratorMode.BUILD) {
+        // Non-build mode — analyze codebase + request, then generate plan
+        const userPrompt = this.prompt || `Run ${this.mode} on this project`;
+        console.log(`[ORCH] Mode: ${this.mode} — analyzing codebase and request...`);
+
+        const analysisResult = await analyze(this.cwd, userPrompt, this.mode);
+        console.log(`[ORCH] Analysis: ${analysisResult.request?.summary || "done"}`);
+        console.log(`[ORCH] Complexity: ${analysisResult.request?.complexity || "unknown"}, areas: ${(analysisResult.request?.affectedAreas || []).join(", ")}`);
+
+        // Create mode instance and build plan
+        this._modeInstance = createMode(this.mode, {
+          cwd: this.cwd,
+          prompt: userPrompt,
+          analysis: analysisResult,
+          flags: this.flags,
+        });
+
+        // Apply mode config overrides
+        const overrides = this._modeInstance.getConfigOverrides();
+        this.config = { ...this.config, ...overrides };
+
+        // Override review settings from mode
+        if (!this._modeInstance.runTaskReview) this.noReview = true;
+
+        const plan = await this._modeInstance.buildPlan(analysisResult);
+        this.phases = plan.phases;
+        this.specText = plan.specText || "";
+        this.analysis = plan.analysis || analysisResult;
+        this._saveState();
+
+        console.log(`[ORCH] Plan generated: ${this.phases.length} phases, ${this.phases.reduce((s, p) => s + p.tasks.length, 0)} tasks`);
       } else {
-        console.error("[ORCH] No spec or checkpoint provided!");
+        console.error("[ORCH] No spec, prompt, or checkpoint provided!");
         this.status = "failed";
         return;
       }
@@ -548,8 +614,12 @@ export class Orchestrator {
         await this._executePhase(this.phases[i], i);
       }
 
-      // Final review
-      if (!this.noReview && this.status === "running") {
+      // Final review (skip if mode says so)
+      const shouldFinalReview = this._modeInstance
+        ? this._modeInstance.runFinalReview
+        : !this.noReview;
+
+      if (shouldFinalReview && this.status === "running") {
         console.log("\n[ORCH] Running FINAL review...");
         this._emit("final_review_start");
 

@@ -1,17 +1,24 @@
 #!/usr/bin/env node
 /**
- * Claude Orchestrator CLI
+ * Claude Orchestrator CLI — Multi-mode developer tool.
  *
- * Usage:
- *   node cli.mjs G:/GitHub/nextspark/projects/petcare/spec.md
- *   node cli.mjs G:/GitHub/nextspark/projects/remis/spec.md
- *   node cli.mjs --logs petcare
- *   node cli.mjs --logs remis
- *   node cli.mjs --logs              (all)
- *   node cli.mjs --stop petcare
- *   node cli.mjs --stop-all
- *   node cli.mjs --status
- *   node cli.mjs --resume G:/GitHub/nextspark/projects/petcare
+ * Commands:
+ *   node cli.mjs build <spec.md>                Build project from spec (0→100)
+ *   node cli.mjs feature "add dark mode"        Add a feature
+ *   node cli.mjs fix "login is broken"          Fix a bug
+ *   node cli.mjs audit [--type security]        Code audit
+ *   node cli.mjs test [--fix]                   Run/generate tests, fix failures
+ *   node cli.mjs review                         Full code review
+ *   node cli.mjs refactor "extract auth service" Refactoring
+ *   node cli.mjs exec "do something"            Generic prompt
+ *
+ * Management:
+ *   node cli.mjs --status                       All running instances
+ *   node cli.mjs --logs [name]                  View logs
+ *   node cli.mjs --stop [name]                  Stop instance
+ *   node cli.mjs --stop-all                     Stop everything
+ *   node cli.mjs --restart [name]               Restart instance
+ *   node cli.mjs --resume <project-dir>         Resume from checkpoint
  */
 
 import { resolve, dirname, basename } from "path";
@@ -20,136 +27,128 @@ import { execSync } from "child_process";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const args = process.argv.slice(2);
+const rawArgs = process.argv.slice(2);
 
-/**
- * Derive a PM2 instance name from a project folder.
- * G:/GitHub/nextspark/projects/petcare → "orch-petcare"
- */
-function instanceName(cwd) {
-  return "orch-" + basename(resolve(cwd));
-}
+// ── Management commands (flags) ─────────────────────────────────────────
 
-// ── --status: show all instances ──────────────────────────────────────
-
-if (args.includes("--status")) {
+if (rawArgs.includes("--status")) {
   run("npx pm2 status");
   process.exit(0);
 }
 
-// ── --stop-all ────────────────────────────────────────────────────────
-
-if (args.includes("--stop-all")) {
+if (rawArgs.includes("--stop-all")) {
   run("npx pm2 delete all");
   process.exit(0);
 }
 
-// ── --stop <name> ─────────────────────────────────────────────────────
-
-if (args.includes("--stop")) {
+if (rawArgs.includes("--stop")) {
   const name = getArgAfter("--stop");
-  if (!name) {
-    console.error("Usage: node cli.mjs --stop petcare");
-    console.error("       node cli.mjs --stop-all");
-    process.exit(1);
-  }
-  const pmName = name.startsWith("orch-") ? name : "orch-" + name;
-  run(`npx pm2 stop ${pmName}`);
+  if (!name) { console.error("Usage: node cli.mjs --stop <name>"); process.exit(1); }
+  run(`npx pm2 stop ${name.startsWith("orch-") ? name : "orch-" + name}`);
   process.exit(0);
 }
 
-// ── --logs [name] ─────────────────────────────────────────────────────
-
-if (args.includes("--logs")) {
+if (rawArgs.includes("--logs")) {
   const name = getArgAfter("--logs");
   if (name) {
-    const pmName = name.startsWith("orch-") ? name : "orch-" + name;
-    run(`npx pm2 logs ${pmName} --lines 100`);
+    run(`npx pm2 logs ${name.startsWith("orch-") ? name : "orch-" + name} --lines 100`);
   } else {
-    // All logs
     run("npx pm2 logs --lines 50");
   }
   process.exit(0);
 }
 
-// ── --restart <name> ──────────────────────────────────────────────────
-
-if (args.includes("--restart")) {
+if (rawArgs.includes("--restart")) {
   const name = getArgAfter("--restart");
-  if (!name) {
-    console.error("Usage: node cli.mjs --restart petcare");
-    process.exit(1);
-  }
-  const pmName = name.startsWith("orch-") ? name : "orch-" + name;
-  run(`npx pm2 restart ${pmName}`);
+  if (!name) { console.error("Usage: node cli.mjs --restart <name>"); process.exit(1); }
+  run(`npx pm2 restart ${name.startsWith("orch-") ? name : "orch-" + name}`);
   process.exit(0);
 }
 
-// ── --resume <project-dir> ───────────────────────────────────────────
-
-if (args.includes("--resume")) {
+if (rawArgs.includes("--resume")) {
   const cwdArg = getArgAfter("--resume");
   if (!cwdArg || !existsSync(cwdArg)) {
-    console.error("Usage: node cli.mjs --resume G:/GitHub/mi-proyecto");
+    console.error("Usage: node cli.mjs --resume <project-dir>");
     process.exit(1);
   }
-  const cwd = resolve(cwdArg);
-  startDaemon(cwd, null, true);
+  startDaemon({ cwd: resolve(cwdArg), mode: "build", resume: true });
   process.exit(0);
 }
 
-// ── Main: spec path ───────────────────────────────────────────────────
+// ── Parse subcommand ────────────────────────────────────────────────────
 
-const specArg = args.find((a) => !a.startsWith("--"));
+const MODES = ["build", "feature", "fix", "audit", "test", "review", "refactor", "exec"];
+const positionalArgs = rawArgs.filter(a => !a.startsWith("--"));
+const firstArg = positionalArgs[0];
 
-if (!specArg) {
-  console.log(`
-  Claude Orchestrator — Autonomous SaaS Builder
-
-  Start:
-    node cli.mjs <spec.md>                 Build project from spec
-    node cli.mjs <spec.md> --dev-port 3001 Custom dev server port
-    node cli.mjs --resume <project-dir>    Resume from checkpoint
-
-  Monitor:
-    node cli.mjs --status                  All running instances
-    node cli.mjs --logs petcare            Logs for petcare
-    node cli.mjs --logs                    All logs
-
-  Control:
-    node cli.mjs --stop petcare            Stop one project
-    node cli.mjs --stop-all                Stop everything
-    node cli.mjs --restart petcare         Restart one project
-
-  Examples:
-    node cli.mjs G:/GitHub/nextspark/projects/petcare/spec.md
-    node cli.mjs G:/GitHub/nextspark/projects/remis/spec.md
-    node cli.mjs --logs petcare
-    node cli.mjs --logs remis
-  `);
+// No args → show help
+if (!firstArg) {
+  showHelp();
   process.exit(0);
 }
 
-const specPath = resolve(specArg);
+// Backwards compat: if first arg is a .md file, treat as "build <spec>"
+if (firstArg.endsWith(".md")) {
+  const specPath = resolve(firstArg);
+  if (!existsSync(specPath)) {
+    console.error(`Error: spec file not found: ${specPath}`);
+    process.exit(1);
+  }
+  startDaemon({ cwd: dirname(specPath), mode: "build", specPath });
+  process.exit(0);
+}
 
-if (!existsSync(specPath)) {
-  console.error(`Error: spec file not found: ${specPath}`);
+// Detect mode
+const mode = MODES.includes(firstArg) ? firstArg : "exec";
+const promptParts = mode === firstArg ? positionalArgs.slice(1) : positionalArgs;
+
+// Build mode requires a spec file
+if (mode === "build") {
+  const specArg = promptParts[0];
+  if (!specArg) {
+    console.error("Usage: node cli.mjs build <spec.md>");
+    process.exit(1);
+  }
+  const specPath = resolve(specArg);
+  if (!existsSync(specPath)) {
+    console.error(`Error: spec file not found: ${specPath}`);
+    process.exit(1);
+  }
+  startDaemon({ cwd: dirname(specPath), mode: "build", specPath });
+  process.exit(0);
+}
+
+// All other modes need --cwd or current directory
+const cwdArg = getArgAfter("--cwd");
+const cwd = cwdArg ? resolve(cwdArg) : process.cwd();
+
+if (!existsSync(cwd)) {
+  console.error(`Error: directory not found: ${cwd}`);
   process.exit(1);
 }
 
-const cwd = dirname(specPath);
-startDaemon(cwd, specPath, false);
+// Assemble prompt from remaining positional args
+const prompt = promptParts.join(" ").trim() || getDefaultPrompt(mode);
 
-// ── Functions ─────────────────────────────────────────────────────────
+// Collect extra flags
+const flags = {};
+if (rawArgs.includes("--type") || rawArgs.includes("--audit-type")) {
+  flags.type = getArgAfter("--type") || getArgAfter("--audit-type") || "full";
+}
+if (rawArgs.includes("--fix")) {
+  flags.fix = true;
+}
 
-function startDaemon(cwd, specPath, resume) {
+startDaemon({ cwd, mode, prompt, flags });
+
+// ── Functions ────────────────────────────────────────────────────────────
+
+function startDaemon({ cwd, mode, specPath, prompt, flags, resume }) {
   const watcherScript = resolve(__dirname, "watcher.mjs");
   const name = instanceName(cwd);
 
-  // Each project gets its own dashboard port: hash the name to a port 3111-3199
   const port = 3111 + Math.abs(simpleHash(name)) % 89;
 
-  // Dev server port: use --dev-port if provided, then try saved dev-port file, fallback to hash
   const devPortArg = getArgAfter("--dev-port");
   let devPort;
   if (devPortArg) {
@@ -163,28 +162,39 @@ function startDaemon(cwd, specPath, resume) {
     }
   }
 
-  let watcherArgs = `--cwd "${cwd}" --port ${port} --dev-port ${devPort} --verbose`;
+  let watcherArgs = `--cwd "${cwd}" --port ${port} --dev-port ${devPort} --verbose --mode ${mode}`;
+
   if (resume) {
     watcherArgs += " --resume";
-  } else {
+  } else if (specPath) {
     watcherArgs += ` --spec "${specPath}"`;
   }
 
-  // Stop existing instance of same project (if any)
-  try {
-    execSync(`npx pm2 delete ${name}`, { stdio: "ignore" });
-  } catch {}
+  if (prompt) {
+    watcherArgs += ` --prompt "${prompt.replace(/"/g, '\\"')}"`;
+  }
+
+  if (flags?.type) watcherArgs += ` --audit-type ${flags.type}`;
+  if (flags?.fix) watcherArgs += " --fix";
+
+  // Stop existing instance
+  try { execSync(`npx pm2 delete ${name}`, { stdio: "ignore" }); } catch {}
 
   const pm2Cmd = `npx pm2 start "${watcherScript}" --name ${name} --interpreter node -- ${watcherArgs}`;
 
+  const modeLabel = mode === "build" ? "BUILD (from spec)" : mode.toUpperCase();
+
   console.log("");
   console.log("┌──────────────────────────────────────────────────────────┐");
-  console.log("│          CLAUDE ORCHESTRATOR — Starting...               │");
+  console.log(`│  CLAUDE ORCHESTRATOR — ${modeLabel.padEnd(35)}│`);
   console.log("└──────────────────────────────────────────────────────────┘");
   console.log(`  Instance:  ${name}`);
   console.log(`  Project:   ${cwd}`);
+  console.log(`  Mode:      ${mode}`);
   if (specPath) console.log(`  Spec:      ${specPath}`);
-  if (resume) console.log(`  Mode:      RESUME from checkpoint`);
+  if (prompt) console.log(`  Prompt:    ${prompt.slice(0, 60)}${prompt.length > 60 ? "..." : ""}`);
+  if (resume) console.log(`  Resume:    from checkpoint`);
+  if (flags?.type) console.log(`  Type:      ${flags.type}`);
   console.log(`  Dashboard: http://localhost:${port}`);
   console.log(`  Dev port:  ${devPort}`);
   console.log("");
@@ -198,13 +208,29 @@ function startDaemon(cwd, specPath, resume) {
   console.log(`    node cli.mjs --logs ${basename(cwd)}       View progress`);
   console.log(`    node cli.mjs --status              All instances`);
   console.log(`    node cli.mjs --stop ${basename(cwd)}       Stop this project`);
-  console.log(`    node cli.mjs --stop-all             Stop everything`);
   console.log("");
 }
 
+function getDefaultPrompt(mode) {
+  const defaults = {
+    audit: "Full code audit: security, performance, quality, accessibility",
+    test: "Run all tests, analyze failures, generate missing tests, fix issues",
+    review: "Full comprehensive code review: architecture, quality, security, performance",
+    feature: "",
+    fix: "",
+    refactor: "",
+    exec: "",
+  };
+  return defaults[mode] || "";
+}
+
+function instanceName(cwd) {
+  return "orch-" + basename(resolve(cwd));
+}
+
 function getArgAfter(flag) {
-  const idx = args.indexOf(flag);
-  const next = args[idx + 1];
+  const idx = rawArgs.indexOf(flag);
+  const next = rawArgs[idx + 1];
   return next && !next.startsWith("--") ? next : null;
 }
 
@@ -217,7 +243,54 @@ function simpleHash(str) {
 }
 
 function run(cmd) {
-  try {
-    execSync(cmd, { cwd: __dirname, stdio: "inherit" });
-  } catch {}
+  try { execSync(cmd, { cwd: __dirname, stdio: "inherit" }); } catch {}
+}
+
+function showHelp() {
+  console.log(`
+  Claude Orchestrator — Multi-mode Developer Tool
+
+  Build (0→100 from spec):
+    node cli.mjs build <spec.md>                       Full project from spec
+    node cli.mjs <spec.md>                             (shorthand)
+
+  Develop:
+    node cli.mjs feature "add dark mode" --cwd .       Add a feature
+    node cli.mjs fix "login button broken" --cwd .     Fix a bug
+    node cli.mjs refactor "extract auth service"       Refactoring
+
+  Quality:
+    node cli.mjs audit --cwd . [--type security]       Code audit
+    node cli.mjs audit --fix --cwd .                   Audit + auto-fix
+    node cli.mjs test --cwd . [--fix]                  Run tests, fix failures
+    node cli.mjs review --cwd .                        Full code review
+
+  Generic:
+    node cli.mjs exec "do something" --cwd .           Any prompt
+
+  Resume & Monitor:
+    node cli.mjs --resume <project-dir>                Resume from checkpoint
+    node cli.mjs --status                              All running instances
+    node cli.mjs --logs [name]                         View logs
+    node cli.mjs --stop [name]                         Stop instance
+    node cli.mjs --stop-all                            Stop everything
+    node cli.mjs --restart [name]                      Restart instance
+
+  Options:
+    --cwd <dir>        Project directory (default: current)
+    --dev-port <port>  Dev server port
+    --type <type>      Audit type: security, performance, quality, a11y, full
+    --fix              Auto-fix issues (audit/test modes)
+    --no-review        Skip code review step
+
+  Examples:
+    node cli.mjs build G:/projects/my-saas/spec.md
+    node cli.mjs feature "add Stripe billing" --cwd G:/projects/my-saas
+    node cli.mjs fix "users can't reset password" --cwd .
+    node cli.mjs audit --type security --cwd G:/projects/my-saas
+    node cli.mjs test --fix --cwd .
+    node cli.mjs review --cwd G:/projects/my-saas
+    node cli.mjs refactor "split monolith into modules" --cwd .
+    node cli.mjs exec "update all deps and fix breaking changes" --cwd .
+  `);
 }

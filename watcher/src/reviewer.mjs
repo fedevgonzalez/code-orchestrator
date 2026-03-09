@@ -53,16 +53,21 @@ function cleanupReviewerJsonls(cwd, before) {
   }
 }
 
-export function callClaudePipe(prompt, cwd) {
+export function callClaudePipe(prompt, cwd, opts = {}) {
   const claudeBin = findClaudeBinary();
   const beforeJsonls = snapshotJsonls(cwd);
+  const { outputFormat = null, maxTurns = null } = opts;
+
+  const args = ["-p", "--no-session-persistence"];
+  if (outputFormat) args.push("--output-format", outputFormat);
+  if (maxTurns) args.push("--max-turns", String(maxTurns));
 
   try {
     // Remove CLAUDECODE env var to avoid "nested session" error
     const env = { ...process.env };
     delete env.CLAUDECODE;
 
-    const result = execFileSync(claudeBin, ["-p", "--no-session-persistence"], {
+    const result = execFileSync(claudeBin, args, {
       input: prompt,
       cwd,
       timeout: REVIEW_TIMEOUT,
@@ -76,7 +81,17 @@ export function callClaudePipe(prompt, cwd) {
     // Clean up JSONL files created by this `claude -p` call
     cleanupReviewerJsonls(cwd, beforeJsonls);
 
-    return result.trim();
+    let output = result.trim();
+
+    // If using json output format, extract the result text
+    if (outputFormat === "json" && output.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(output);
+        output = parsed.result || output;
+      } catch {}
+    }
+
+    return output;
   } catch (e) {
     cleanupReviewerJsonls(cwd, beforeJsonls);
     console.error(`[REVIEWER] claude -p failed: ${e.message?.slice(0, 200)}`);

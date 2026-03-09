@@ -29,6 +29,17 @@ export const AgentState = {
   EXITED: "exited",
 };
 
+export const OrchestratorMode = {
+  BUILD: "build",
+  FEATURE: "feature",
+  FIX: "fix",
+  AUDIT: "audit",
+  TEST: "test",
+  REVIEW: "review",
+  REFACTOR: "refactor",
+  EXEC: "exec",
+};
+
 export const DEFAULT_CONFIG = {
   // Timeouts (ms)
   turnTimeout: 10 * 60_000,       // 10 min per task turn
