@@ -112,15 +112,15 @@ const PHASE_VALIDATORS = {
   "core-api":      ["build"],
   "payments":      ["build"],
   "frontend":      ["build"],
-  "onboarding":    ["build"],
+  "onboarding":    ["build", "onboarding-files"],
   "integration":   ["build", "healthcheck"],
   "ux-polish":     ["build"],
   "nextspark-polish": ["build"],
-  "seed-data":     ["build"],
+  "seed-data":     ["build", "seed-files"],
   "landing":       ["build"],
   "seo":           ["build", "seo-files"],
   "legal":         ["build", "legal-files"],
-  "email":         ["build"],
+  "email":         ["build", "email-files"],
   "analytics":     ["build"],
   "security":      ["build"],
   "support":       ["build"],
@@ -190,6 +190,15 @@ export async function runPhaseValidation(phaseId, cwd, config = {}) {
         break;
       case "legal-files":
         result = checkLegalFiles(cwd);
+        break;
+      case "onboarding-files":
+        result = checkOnboardingFiles(cwd);
+        break;
+      case "email-files":
+        result = checkEmailFiles(cwd);
+        break;
+      case "seed-files":
+        result = checkSeedFiles(cwd);
         break;
       default:
         result = { type: v, ok: true, message: `Unknown validator: ${v}` };
@@ -828,6 +837,165 @@ function checkLegalFiles(cwd) {
     return { type: "legal-files", ok: true, message: "Legal pages present (terms, privacy)" };
   }
   return { type: "legal-files", ok: false, message: `Missing legal pages: ${missing.join(", ")}` };
+}
+
+// ── Onboarding Files Check ────────────────────────────────────────
+
+/**
+ * Verify onboarding/walkme files were created.
+ * Checks for tour definitions, provider, and selectors.
+ */
+function checkOnboardingFiles(cwd) {
+  // Search in multiple possible locations
+  const searchDirs = ["contents/themes", "src", "app", "lib"];
+  let found = [];
+
+  for (const dir of searchDirs) {
+    const fullDir = join(cwd, dir);
+    if (!existsSync(fullDir)) continue;
+    try {
+      const files = findFilesRecursive(fullDir, (f) =>
+        f.includes("onboarding") || f.includes("walkme") || f.includes("tours") || f.includes("tour")
+      );
+      found.push(...files);
+    } catch {}
+  }
+
+  // Also check for walkme plugin
+  const walkmePlugin = join(cwd, "contents", "plugins", "walkme");
+  if (existsSync(walkmePlugin)) found.push(walkmePlugin);
+
+  if (found.length >= 2) {
+    return { type: "onboarding-files", ok: true, message: `Onboarding files found (${found.length} files)` };
+  }
+
+  return {
+    type: "onboarding-files",
+    ok: false,
+    message: `Onboarding not implemented — found only ${found.length} related files`,
+    fixPrompt: `The onboarding/walkme system was not implemented. You MUST create:
+1. Install walkme plugin: copy G:/GitHub/nextspark/repo/plugins/walkme/ to contents/plugins/walkme/ and register in theme config
+2. Create onboarding files in contents/themes/{theme}/onboarding/:
+   - tours.ts — Tour definitions (getting-started tour + contextual tooltips)
+   - selectors.ts — TOUR_TARGETS mapping semantic names to data-cy selectors
+   - OnboardingProvider.tsx — Wraps WalkmeProvider, registers tours
+   - OnboardingWrapper.tsx — Layout wrapper with provider + resume banner
+   - index.ts — Exports
+3. Add the OnboardingWrapper to the dashboard layout
+4. Create at least a "getting-started" multi-step tour
+
+Reference implementation is at G:/GitHub/claude-orchestrator/watcher/reference/nextspark-onboarding/`,
+  };
+}
+
+// ── Email Files Check ─────────────────────────────────────────────
+
+/**
+ * Verify email templates were created.
+ */
+function checkEmailFiles(cwd) {
+  const searchDirs = ["src/emails", "emails", "lib/emails", "app/emails", "contents"];
+  let found = [];
+
+  for (const dir of searchDirs) {
+    const fullDir = join(cwd, dir);
+    if (!existsSync(fullDir)) continue;
+    try {
+      const files = findFilesRecursive(fullDir, (f) =>
+        f.includes("email") && (f.endsWith(".tsx") || f.endsWith(".ts"))
+      );
+      found.push(...files);
+    } catch {}
+  }
+
+  // Also check for email utility
+  const emailUtil = ["src/lib/email.ts", "lib/email.ts", "utils/email.ts", "src/utils/email.ts"];
+  for (const p of emailUtil) {
+    if (existsSync(join(cwd, p))) found.push(p);
+  }
+
+  if (found.length >= 2) {
+    return { type: "email-files", ok: true, message: `Email templates found (${found.length} files)` };
+  }
+
+  return {
+    type: "email-files",
+    ok: false,
+    message: `Email templates not implemented — found only ${found.length} related files`,
+    fixPrompt: `Email templates were not created. You MUST create:
+1. Email templates using React Email or plain HTML in src/emails/ (or similar):
+   - welcome.tsx — Welcome email after signup
+   - password-reset.tsx — Password reset email
+   - invoice.tsx — Payment receipt/invoice
+2. Email sending utility at src/lib/email.ts (using Resend: RESEND_API_KEY from .env)
+3. Add RESEND_API_KEY to .env.example with a comment
+
+Create at least 2 email templates and the sending utility.`,
+  };
+}
+
+// ── Seed Files Check ──────────────────────────────────────────────
+
+/**
+ * Verify seed script was created.
+ */
+function checkSeedFiles(cwd) {
+  const possiblePaths = [
+    "scripts/seed.ts", "scripts/seed.js", "scripts/seed.mjs",
+    "src/lib/seed.ts", "src/lib/seed.js",
+    "prisma/seed.ts", "prisma/seed.js",
+    "drizzle/seed.ts", "drizzle/seed.js",
+    "db/seed.ts", "db/seed.js",
+  ];
+
+  const found = possiblePaths.filter((p) => existsSync(join(cwd, p)));
+
+  // Also check package.json for seed script
+  let hasSeedScript = false;
+  try {
+    const pkg = JSON.parse(readFileSync(join(cwd, "package.json"), "utf-8"));
+    hasSeedScript = !!(pkg.scripts?.seed || pkg.scripts?.["db:seed"]);
+  } catch {}
+
+  if (found.length > 0 || hasSeedScript) {
+    return { type: "seed-files", ok: true, message: `Seed data found: ${found.join(", ") || "via package.json script"}` };
+  }
+
+  return {
+    type: "seed-files",
+    ok: false,
+    message: "No seed script found",
+    fixPrompt: `No seed data script was created. You MUST create:
+1. A seed script at scripts/seed.ts with realistic demo data:
+   - Use real-sounding names (NOT "John Doe" or "test@test.com")
+   - Include 15-30 records per entity with varied statuses and dates
+   - Make it idempotent (safe to run multiple times — upsert or check before insert)
+2. Add "seed" or "db:seed" script to package.json that runs the seed file
+3. The seed should use the DATABASE_URL from .env to connect to postgres.lab`,
+  };
+}
+
+// ── File search helper ────────────────────────────────────────────
+
+/**
+ * Recursively find files matching a filter function.
+ */
+function findFilesRecursive(dir, filterFn, maxDepth = 5, depth = 0) {
+  if (depth >= maxDepth) return [];
+  const results = [];
+  try {
+    const entries = readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.name === "node_modules" || entry.name === ".next") continue;
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        results.push(...findFilesRecursive(full, filterFn, maxDepth, depth + 1));
+      } else if (filterFn(entry.name)) {
+        results.push(full);
+      }
+    }
+  } catch {}
+  return results;
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────
