@@ -517,6 +517,22 @@ export class Orchestrator {
         console.log(`[ORCH] Continuing session: ${this.sessionId}`);
       }
 
+      // On resume, fix up phases that were completed in a previous run
+      // but whose status wasn't saved (e.g. checkpoint from a crashed session)
+      if (this._resume && this.currentPhaseIdx > 0) {
+        for (let i = 0; i < this.currentPhaseIdx; i++) {
+          const p = this.phases[i];
+          if (p.status !== PhaseStatus.DONE) {
+            const allTasksDone = p.tasks.length > 0 && p.tasks.every(t => t.status === TaskStatus.DONE);
+            if (allTasksDone) {
+              console.log(`[ORCH] Fixing stale phase ${i} "${p.id}" → DONE (all tasks completed)`);
+              p.status = PhaseStatus.DONE;
+            }
+          }
+        }
+        this._saveState();
+      }
+
       // Execute phases
       for (let i = this.currentPhaseIdx; i < this.phases.length; i++) {
         this.currentPhaseIdx = i;
@@ -546,14 +562,29 @@ export class Orchestrator {
         console.log("[ORCH] Final review complete");
       }
 
-      // Done — only mark completed if all phases are actually done
+      // Done — mark completed if we've run through all phases
       if (this.status === "running") {
-        const allDone = this.phases.every(p => p.status === PhaseStatus.DONE);
-        if (allDone) {
+        // Check if all tasks across all phases are done
+        const totalTasks_ = this.phases.reduce((s, p) => s + p.tasks.length, 0);
+        const doneTasks_ = this.phases.reduce(
+          (s, p) => s + p.tasks.filter((t) => t.status === TaskStatus.DONE).length, 0
+        );
+        const allPhasesDone = this.phases.every(p => p.status === PhaseStatus.DONE);
+        const allTasksDone = doneTasks_ === totalTasks_ && totalTasks_ > 0;
+
+        if (allPhasesDone || allTasksDone) {
+          // If all tasks are done but phases show pending (checkpoint from crashed session),
+          // fix up the phase statuses before marking completed
+          if (!allPhasesDone && allTasksDone) {
+            console.log(`[ORCH] All ${doneTasks_} tasks done — fixing stale phase statuses`);
+            for (const p of this.phases) {
+              if (p.status !== PhaseStatus.DONE) p.status = PhaseStatus.DONE;
+            }
+          }
           this.status = "completed";
         } else {
           const doneCount = this.phases.filter(p => p.status === PhaseStatus.DONE).length;
-          console.error(`[ORCH] Run ended but only ${doneCount}/${this.phases.length} phases done — marking as failed`);
+          console.error(`[ORCH] Run ended but only ${doneCount}/${this.phases.length} phases done (${doneTasks_}/${totalTasks_} tasks) — marking as failed`);
           this.status = "failed";
         }
       }
