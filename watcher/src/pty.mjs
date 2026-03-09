@@ -80,9 +80,14 @@ export class ClaudePTY {
       }
     });
 
+    // Save PID immediately so we can kill orphans later
+    this._lastPid = this._pty.pid;
+
     this._pty.onExit(({ exitCode, signal }) => {
       console.log(`[PTY] Process exited (code=${exitCode}, signal=${signal})`);
       this._alive = false;
+      // Immediately kill any orphaned child processes (claude.exe etc.)
+      this._killOrphans();
     });
 
     this._alive = true;
@@ -152,22 +157,27 @@ export class ClaudePTY {
   /**
    * Kill the PTY process.
    */
+  /**
+   * Kill orphaned claude.exe processes spawned by this PTY.
+   */
+  _killOrphans() {
+    if (!this._lastPid || platform() !== "win32") return;
+    try {
+      execSync(`taskkill /PID ${this._lastPid} /T /F`, { stdio: "ignore", timeout: 5000 });
+      console.log(`[PTY] Force-killed process tree (PID ${this._lastPid})`);
+    } catch {
+      // Process tree already gone — that's fine
+    }
+  }
+
   kill() {
     if (this._pty) {
-      const pid = this._pty.pid;
       try {
         this._pty.kill();
       } catch {}
-      // On Windows, node-pty.kill() doesn't reliably kill child processes.
-      // Use taskkill to force-kill the entire process tree.
-      if (pid && platform() === "win32") {
-        try {
-          execSync(`taskkill /PID ${pid} /T /F`, { stdio: "ignore", timeout: 5000 });
-          console.log(`[PTY] Force-killed process tree (PID ${pid})`);
-        } catch {}
-      }
       this._pty = null;
     }
+    this._killOrphans();
     this._alive = false;
     this._outputBuffer = [];
     this._onDataCallbacks = [];
