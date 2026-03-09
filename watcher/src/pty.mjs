@@ -43,6 +43,7 @@ export class ClaudePTY {
     this._pty = null;
     this._outputBuffer = [];
     this._onDataCallbacks = [];
+    this._alive = false;
   }
 
   /**
@@ -78,6 +79,12 @@ export class ClaudePTY {
       }
     });
 
+    this._pty.onExit(({ exitCode, signal }) => {
+      console.log(`[PTY] Process exited (code=${exitCode}, signal=${signal})`);
+      this._alive = false;
+    });
+
+    this._alive = true;
     console.log(`[PTY] Spawned: ${claudeBin} --dangerously-skip-permissions (cwd: ${cwd})`);
   }
 
@@ -131,7 +138,7 @@ export class ClaudePTY {
    * @returns {boolean}
    */
   get isAlive() {
-    return this._pty !== null && this._pty.pid !== undefined;
+    return this._alive && this._pty !== null;
   }
 
   /**
@@ -151,6 +158,7 @@ export class ClaudePTY {
       } catch {}
       this._pty = null;
     }
+    this._alive = false;
     this._outputBuffer = [];
     this._onDataCallbacks = [];
     console.log("[PTY] Killed");

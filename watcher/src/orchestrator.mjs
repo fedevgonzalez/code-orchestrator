@@ -227,6 +227,10 @@ export class Orchestrator {
     let sawActivity = false;
 
     while (Date.now() - start < timeout) {
+      // Bail early if PTY died
+      if (!this.pty?.isAlive) {
+        throw new Error("PTY process died while waiting for idle");
+      }
       const recent = this.pty?.peekRecent(1000) || "";
       // Strip ALL ANSI escape sequences including CSI, OSC, and private sequences
       const clean = recent
@@ -689,9 +693,16 @@ export class Orchestrator {
         console.log("[ORCH] Final review complete");
       }
 
-      // Done
+      // Done — only mark completed if all phases are actually done
       if (this.status === "running") {
-        this.status = "completed";
+        const allDone = this.phases.every(p => p.status === PhaseStatus.DONE);
+        if (allDone) {
+          this.status = "completed";
+        } else {
+          const doneCount = this.phases.filter(p => p.status === PhaseStatus.DONE).length;
+          console.error(`[ORCH] Run ended but only ${doneCount}/${this.phases.length} phases done — marking as failed`);
+          this.status = "failed";
+        }
       }
 
       const elapsed = Math.floor((Date.now() - this.startedAt) / 1000);
