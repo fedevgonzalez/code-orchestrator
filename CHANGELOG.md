@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.1] - 2026-03-10
+
+### Added
+- **VS Code / Cursor extension** (`vscode-extension/`) with:
+  - Right-click `.md` files to orchestrate with smart file analysis
+  - Automatic mode recommendation based on file content (spec, backlog, status report, bug report, etc.)
+  - Item extraction (B1, F2, etc.) with type and priority detection
+  - Embedded sidebar dashboard via WebSocket
+  - Status bar progress indicator (task count, percentage, cost)
+  - Command palette integration for all 8 modes
+  - Run history tree view
+  - Duplicate run protection -- checks PM2 before starting, requires confirmation
+  - Binary resolution: local cli.mjs, global npm, which/where, npx fallback
+
+### Changed
+- **Premium dashboard UI overhaul** -- OKLCH color system, Inter + JetBrains Mono typography, 8pt grid spacing tokens, task status chips and score pill badges, hub-and-spoke logo icon, active phase left-accent border, refined 6px progress bar with material easing, split log timestamps, accessible keyboard navigation, ARIA roles, prefers-reduced-motion support, responsive auto-fit grid
+
+### Fixed
+- **Cost tracking always showing $0** -- Claude CLI returns cost in `total_cost_usd` field, parser now checks this key first
+
 ## [2.2.0] - 2026-03-10
 
 ### Added

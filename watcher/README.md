@@ -237,6 +237,49 @@ Config files are searched in this order: `.orchestrator.config.mjs`, `.orchestra
 | `--uninstall-watchdog` | Remove the system watchdog |
 | `--watchdog-status` | Check if watchdog is active |
 
+## VS Code / Cursor Extension
+
+Install the extension for a fully integrated editor experience:
+
+```bash
+# From the repo (dev build)
+cd vscode-extension && npm install && npx @vscode/vsce package
+# Then install the .vsix in VS Code/Cursor
+```
+
+### Features
+
+- **Right-click any `.md` file** -- smart file analyzer detects bugs, features, specs and recommends the best orchestration mode with a generated prompt
+- **Duplicate run protection** -- checks PM2 for existing instances before starting, requires explicit confirmation to replace
+- **Sidebar dashboard** -- embedded WebSocket panel showing real-time phase/task progress
+- **Status bar** -- live progress indicator with task count, percentage, and cost
+- **Command palette** -- all 8 modes available via `Ctrl+Shift+P` -> "Code Orchestrator"
+- **Run history** -- tree view in the sidebar showing past runs with status and duration
+
+### Smart File Analysis
+
+When you right-click a `.md` file, the extension reads the content and automatically:
+
+1. Detects file type (spec, backlog, status report, bug report, test plan, etc.)
+2. Extracts item IDs (B1, B2, F1, F2, etc.) with types and priorities
+3. Recommends the best mode (`build`, `fix`, `exec`, etc.) with a confidence level
+4. Generates a detailed prompt referencing specific items and file paths
+5. Shows the recommendation with options to accept, customize, or override
+
+```
++------------------------------------------------------+
+| Code Orchestrator -- Smart Analysis                  |
+|------------------------------------------------------|
+| (check) Build from Backlog (Recommended)  mode: exec |
+| Backlog with 23 items (5 bugs, 18 features).        |
+| Will implement in priority order.                    |
+|------------------------------------------------------|
+| (edit) Customize prompt before running               |
+|------------------------------------------------------|
+| (play) exec    (wrench) fix    (search) audit   ... |
++------------------------------------------------------+
+```
+
 ## Dashboard
 
 Each orchestrator instance serves a real-time monitoring dashboard over HTTP. The default port is auto-assigned starting from 3111.
@@ -245,9 +288,15 @@ Each orchestrator instance serves a real-time monitoring dashboard over HTTP. Th
 http://localhost:3111
 ```
 
-<!-- TODO: Add dashboard screenshot -->
+The dashboard features:
 
-The dashboard shows live phase/task progress, log output, and review scores via WebSocket.
+- **OKLCH color system** with perceptually uniform accents and 4-level depth hierarchy
+- **Task status chips and score badges** for instant scannability
+- **Live WebSocket** connection with automatic reconnection
+- **Phase timeline** with active border indicators
+- **Log viewer** with split timestamps and colored message types
+- **Accessibility** -- ARIA roles, keyboard navigation, focus-visible, prefers-reduced-motion
+- **Responsive** -- auto-fit grid, mobile padding overrides
 
 ### Dashboard Authentication
 
@@ -361,39 +410,40 @@ Override any detected command in your `.orchestrator.config.mjs`.
 
 ```
 code-orchestrator/
-├── watcher/
-│   ├── cli.mjs                  # CLI entry point, subcommand routing, PM2 daemon management
-│   ├── watcher.mjs              # Supervisor: HTTP/WS server, auto-restart, lifecycle
+├── watcher/                       # Core CLI + engine
+│   ├── cli.mjs                    # CLI entry point, subcommand routing, PM2 daemon
+│   ├── watcher.mjs                # Supervisor: HTTP/WS server, auto-restart, lifecycle
+│   ├── watchdog.mjs               # System watchdog (reboot recovery)
+│   ├── dashboard/index.html       # Real-time monitoring dashboard (OKLCH, accessible)
 │   ├── package.json
 │   └── src/
-│       ├── orchestrator.mjs     # Core execution engine (phase/task loop)
-│       ├── analyzer.mjs         # Two-phase codebase analyzer (local scan + Claude)
-│       ├── planner.mjs          # Mode dispatcher
-│       ├── claude-cli.mjs       # Headless claude -p adapter
-│       ├── reviewer.mjs         # Code review via Claude pipe mode
-│       ├── validator.mjs        # Build, test, e2e, custom validation
-│       ├── spec.mjs             # Spec-to-plan converter (24-phase build pipeline)
-│       ├── checkpoint.mjs       # Atomic checkpoint save/load for crash recovery
-│       ├── rate-limiter.mjs     # Rate limiter for Claude API calls
-│       ├── config.mjs           # Project config loader and merger
-│       ├── plugins.mjs          # Plugin registry (validators + hooks)
-│       ├── history.mjs          # Run history tracking and stats
-│       ├── models.mjs           # Constants, enums, factory functions
-│       ├── jsonl.mjs            # JSONL transcript writer
-│       └── modes/
-│           ├── base-mode.mjs    # Abstract base class for all modes
-│           ├── build.mjs        # Full project from spec (24 phases)
-│           ├── feature.mjs      # Add feature
-│           ├── fix.mjs          # Fix bug
-│           ├── audit.mjs        # Code audit
-│           ├── test.mjs         # Testing
-│           ├── review.mjs       # Code review
-│           ├── refactor.mjs     # Refactoring
-│           └── exec.mjs         # Generic prompt
-├── dashboard/
-│   └── static/
-│       └── index.html           # Real-time monitoring dashboard
-├── spec.example.md              # Example spec file for build mode
+│       ├── orchestrator.mjs       # Core execution engine (phase/task loop)
+│       ├── analyzer.mjs           # Two-phase codebase analyzer (local scan + Claude)
+│       ├── claude-cli.mjs         # Headless claude -p adapter with cost tracking
+│       ├── reviewer.mjs           # Code review via Claude pipe mode
+│       ├── validator.mjs          # Build, test, e2e, custom validation
+│       ├── spec.mjs               # Spec-to-plan converter (24-phase build pipeline)
+│       ├── checkpoint.mjs         # Atomic checkpoint save/load for crash recovery
+│       ├── rate-limiter.mjs       # Rate limiter for Claude API calls
+│       ├── config.mjs             # Project config loader and merger
+│       ├── plugins.mjs            # Plugin registry (validators + hooks)
+│       ├── history.mjs            # Run history tracking and stats
+│       ├── planner.mjs            # Mode dispatcher
+│       ├── models.mjs             # Constants, enums, factory functions
+│       ├── jsonl.mjs              # JSONL transcript writer
+│       └── modes/                 # 8 specialized execution modes
+├── vscode-extension/              # VS Code / Cursor extension
+│   ├── src/
+│   │   ├── extension.ts           # Extension entry, commands, webview dashboard
+│   │   ├── file-analyzer.ts       # Smart .md file analyzer (mode + prompt generation)
+│   │   ├── runner.ts              # CLI runner with binary resolution + duplicate check
+│   │   ├── status-bar.ts          # Status bar progress indicator
+│   │   └── run-history.ts         # Run history tree view
+│   ├── media/sidebar-icon.svg
+│   └── package.json
+├── spec.example.md
+├── ROADMAP.md
+├── SECURITY.md
 ├── CONTRIBUTING.md
 ├── CHANGELOG.md
 ├── LICENSE

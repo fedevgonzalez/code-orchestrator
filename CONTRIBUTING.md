@@ -46,38 +46,45 @@ The `--experimental-vm-modules` flag is required because the project uses native
 ## Project Structure
 
 ```
-watcher/
-  cli.mjs              # CLI entry point, subcommand routing, PM2 daemon management
-  watcher.mjs          # Supervisor: HTTP/WS server, auto-restart loop
+watcher/                         # Core CLI + engine (npm package: code-orchestrator)
+  cli.mjs                        # CLI entry point, subcommand routing, PM2 daemon
+  watcher.mjs                    # Supervisor: HTTP/WS server, auto-restart loop
+  watchdog.mjs                   # System watchdog (reboot recovery)
+  dashboard/index.html           # Real-time monitoring dashboard
   src/
-    orchestrator.mjs   # Core execution engine (phase/task loop)
-    analyzer.mjs       # Two-phase codebase analyzer (local scan + Claude call)
-    planner.mjs        # Mode dispatcher -- routes to the correct mode class
-    claude-cli.mjs     # Headless claude -p adapter (subprocess management)
-    reviewer.mjs       # Code review via Claude pipe mode
-    validator.mjs      # Phase validators (build, test, e2e, custom commands)
-    checkpoint.mjs     # Atomic checkpoint save/load for crash recovery
-    rate-limiter.mjs   # Rate limiter for Claude API calls
-    config.mjs         # Project config loader (.orchestrator.config.mjs)
-    plugins.mjs        # Plugin registry (custom validators + lifecycle hooks)
-    history.mjs        # Run history tracking and statistics
-    models.mjs         # Constants, enums, default config, factory functions
-    jsonl.mjs          # JSONL transcript writer
-    spec.mjs           # Spec file parser for build mode (24-phase pipeline)
-    modes/
-      base-mode.mjs    # Abstract base class for all modes
-      build.mjs        # Full project from spec
-      feature.mjs      # Add feature
-      fix.mjs          # Fix bug
-      audit.mjs        # Code audit
-      test.mjs         # Testing
-      review.mjs       # Code review
-      refactor.mjs     # Refactoring
-      exec.mjs         # Generic prompt
-  tests/               # Jest test files
-dashboard/
-  static/
-    index.html         # Real-time monitoring dashboard
+    orchestrator.mjs             # Core execution engine (phase/task loop)
+    analyzer.mjs                 # Two-phase codebase analyzer (local scan + Claude)
+    claude-cli.mjs               # Headless claude -p adapter with cost tracking
+    reviewer.mjs                 # Code review via Claude pipe mode
+    validator.mjs                # Phase validators (build, test, e2e, custom)
+    checkpoint.mjs               # Atomic checkpoint save/load for crash recovery
+    rate-limiter.mjs             # Rate limiter for Claude API calls
+    config.mjs                   # Project config loader
+    plugins.mjs                  # Plugin registry (validators + hooks)
+    history.mjs                  # Run history tracking
+    planner.mjs                  # Mode dispatcher
+    models.mjs                   # Constants, enums, defaults
+    jsonl.mjs                    # JSONL transcript writer
+    spec.mjs                     # Spec parser for build mode (24-phase pipeline)
+    modes/                       # 8 execution modes
+  tests/                         # Jest test files
+vscode-extension/                # VS Code / Cursor extension (TypeScript)
+  src/
+    extension.ts                 # Extension entry, commands, webview dashboard
+    file-analyzer.ts             # Smart .md analyzer (mode + prompt generation)
+    runner.ts                    # CLI runner with binary resolution
+    status-bar.ts                # Status bar progress indicator
+    run-history.ts               # Run history tree view
+```
+
+### Developing the VS Code Extension
+
+```bash
+cd vscode-extension
+npm install
+npm run compile          # Build TypeScript
+npx @vscode/vsce package # Create .vsix
+# Install in VS Code/Cursor: Extensions > ... > Install from VSIX
 ```
 
 ## How to Add a New Mode
@@ -190,4 +197,4 @@ Open an issue at https://github.com/fedevgonzalez/code-orchestrator/issues with:
 - Steps to reproduce the problem
 - Expected vs. actual behavior
 - Node.js version and operating system
-- Relevant log output (from `claude-orch --logs`)
+- Relevant log output (from `code-orch --logs`)
