@@ -282,11 +282,14 @@ When you right-click a `.md` file, the extension reads the content and automatic
 
 ## Dashboard
 
-Each orchestrator instance serves a real-time monitoring dashboard over HTTP. The default port is auto-assigned starting from 3111.
+Each orchestrator instance serves a real-time monitoring dashboard over HTTP. Ports are auto-assigned per project (`3111 + hash(name) % 89`) with collision detection — you can run multiple orchestrators simultaneously without conflicts.
 
 ```
-http://localhost:3111
+http://localhost:3118   # project-a (auto-assigned)
+http://localhost:3145   # project-b (auto-assigned)
 ```
+
+The actual port is printed at startup and saved to `.orchestrator/dashboard-port` for tool discovery.
 
 The dashboard features:
 

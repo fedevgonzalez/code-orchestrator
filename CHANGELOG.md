@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.4.1] - 2026-03-10
 
+### Added
+- **Port collision detection** -- when two projects hash to the same dashboard port, the CLI auto-increments to the next available port. Enables running multiple orchestrators simultaneously without conflicts
+
 ### Fixed
 - **Extension dashboard port discovery** -- each project gets a dynamic port (`3111 + hash % 89`), but the extension was hardcoded to 3160. Now reads `.orchestrator/dashboard-port` with hash-based fallback
 - CLI now saves dashboard port to `.orchestrator/dashboard-port` on startup for extension/tool discovery
