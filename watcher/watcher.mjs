@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Claude Orchestrator — Main Entry Point
+ * Code Orchestrator — Main Entry Point
  *
  * Runs the orchestration engine directly in Node.js (no Python).
  *   1. Parses CLI args
@@ -435,7 +435,7 @@ process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 
 console.log("");
 console.log("┌──────────────────────────────────────────────────────────┐");
-console.log("│          CLAUDE ORCHESTRATOR v2 — Node.js                │");
+console.log("│          CODE ORCHESTRATOR v2 — Node.js                  │");
 console.log("└──────────────────────────────────────────────────────────┘");
 console.log(`  Project:      ${PROJECT_CWD}`);
 console.log(`  Mode:         ${args.mode || "build"}`);

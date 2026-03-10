@@ -1,21 +1,21 @@
-# Claude Orchestrator
+# Code Orchestrator
 
-**Give Claude a spec. Get a reviewed codebase back.**
+**Give your AI coding agent a spec. Get a reviewed codebase back.**
 
-Claude Orchestrator turns Claude Code into an autonomous multi-phase build system. It analyzes your project, generates a phased execution plan, runs each task via `claude -p`, self-reviews and scores every output, auto-fixes failures, and validates the result -- all with crash recovery and real-time monitoring.
+Code Orchestrator turns AI coding agents into an autonomous multi-phase build system. It analyzes your project, generates a phased execution plan, runs each task via `claude -p`, self-reviews and scores every output, auto-fixes failures, and validates the result -- all with crash recovery and real-time monitoring.
 
 [![CI](https://github.com/fedevgonzalez/claude-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/fedevgonzalez/claude-orchestrator/actions/workflows/ci.yml)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js 18+](https://img.shields.io/badge/node-18%2B-green.svg)](https://nodejs.org)
-[![npm](https://img.shields.io/npm/v/claude-orchestrator)](https://www.npmjs.com/package/claude-orchestrator)
+[![npm](https://img.shields.io/npm/v/code-orchestrator)](https://www.npmjs.com/package/code-orchestrator)
 
 ---
 
 ## Why This Tool?
 
-Claude Code is powerful, but for large tasks it needs structure: phased plans, automatic validation, crash recovery, and self-review. Claude Orchestrator provides that structure.
+Claude Code is powerful, but for large tasks it needs structure: phased plans, automatic validation, crash recovery, and self-review. Code Orchestrator provides that structure.
 
-| | Claude Code (raw) | Claude Orchestrator |
+| | Claude Code (raw) | Code Orchestrator |
 |---|---|---|
 | Execution | Single prompt | Multi-phase plan with dependencies |
 | Review | Manual | Auto-review + scoring (1-10) + auto-fix |
@@ -62,13 +62,13 @@ Crash recovery saves a checkpoint after every task. On failure, the supervisor a
 ### Install
 
 ```bash
-npm install -g claude-orchestrator
+npm install -g code-orchestrator
 ```
 
 Or run directly with npx:
 
 ```bash
-npx claude-orchestrator feature "add dark mode" --cwd /path/to/project
+npx code-orchestrator feature "add dark mode" --cwd /path/to/project
 ```
 
 ### Usage by Mode
@@ -436,7 +436,7 @@ See [spec.example.md](spec.example.md) for a complete example.
 
 ## Cost Guidance
 
-Claude Orchestrator calls `claude -p` for each task, review, and fix attempt. Costs depend on the mode and project complexity:
+Code Orchestrator calls `claude -p` for each task, review, and fix attempt. Costs depend on the mode and project complexity:
 
 | Mode | Typical Claude Calls | Estimated Cost Range |
 |------|---------------------|---------------------|

@@ -1,13 +1,13 @@
 /**
- * PM2 Ecosystem Config — Claude Orchestrator
+ * PM2 Ecosystem Config — Code Orchestrator
  *
  * Usage:
  *   set ORCH_CWD=/path/to/project && set ORCH_SPEC=/path/to/project/spec.md && npx pm2 start ecosystem.config.cjs
  *
  * Control:
- *   npx pm2 logs claude-orchestrator
+ *   npx pm2 logs code-orchestrator
  *   npx pm2 status
- *   npx pm2 stop claude-orchestrator
+ *   npx pm2 stop code-orchestrator
  */
 
 const path = require("path");
@@ -25,7 +25,7 @@ if (!PROJECT_CWD || !SPEC_PATH) {
 module.exports = {
   apps: [
     {
-      name: "claude-orchestrator",
+      name: "code-orchestrator",
       script: "watcher.mjs",
       cwd: __dirname,
       interpreter: "node",

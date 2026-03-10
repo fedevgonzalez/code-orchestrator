@@ -643,7 +643,7 @@ export class Orchestrator {
     const modeLabel = this.mode === OrchestratorMode.BUILD ? "build (from spec)" : this.mode;
 
     console.log("\n╔══════════════════════════════════════════════════════════╗");
-    console.log("║       CLAUDE ORCHESTRATOR — ENGINE (headless -p)       ║");
+    console.log("║       CODE ORCHESTRATOR — ENGINE (headless -p)           ║");
     console.log("╚══════════════════════════════════════════════════════════╝");
     console.log(`  Project:  ${this.cwd}`);
     console.log(`  Run ID:   ${this.runId}`);

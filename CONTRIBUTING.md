@@ -1,4 +1,4 @@
-# Contributing to Claude Orchestrator
+# Contributing to Code Orchestrator
 
 Contributions are welcome. This guide covers development setup, code conventions, and the PR process.
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Claude Orchestrator CLI — Multi-mode developer tool.
+ * Code Orchestrator CLI — Multi-mode developer tool.
  *
  * Commands:
  *   node cli.mjs build <spec.md>                Build project from spec (0→100)
@@ -207,7 +207,7 @@ function startDaemon({ cwd, mode, specPath, prompt, flags, resume, dryRun }) {
 
   console.log("");
   console.log("┌──────────────────────────────────────────────────────────┐");
-  console.log(`│  CLAUDE ORCHESTRATOR — ${modeLabel.padEnd(35)}│`);
+  console.log(`│  CODE ORCHESTRATOR — ${modeLabel.padEnd(36)}│`);
   console.log("└──────────────────────────────────────────────────────────┘");
   console.log(`  Instance:  ${name}`);
   console.log(`  Project:   ${cwd}`);
@@ -296,7 +296,7 @@ function run(cmd) {
 
 function showHelp() {
   console.log(`
-  Claude Orchestrator — Multi-mode Developer Tool
+  Code Orchestrator — Multi-mode Developer Tool
 
   Build (0→100 from spec):
     node cli.mjs build <spec.md>                       Full project from spec

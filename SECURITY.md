@@ -2,7 +2,7 @@
 
 ## Security Model
 
-Claude Orchestrator executes AI-generated code via `claude -p` subprocesses. This is inherently powerful and comes with security considerations.
+Code Orchestrator executes AI-generated code via `claude -p` subprocesses. This is inherently powerful and comes with security considerations.
 
 ### Permission Modes
 

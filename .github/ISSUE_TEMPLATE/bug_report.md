@@ -35,7 +35,7 @@ Paste relevant output from `claude-orch --logs <name>` or the terminal:
 - OS: (e.g., Windows 11, macOS 14, Ubuntu 22.04)
 - Node.js version: (run `node --version`)
 - Claude Code CLI version: (run `claude --version`)
-- Orchestrator version: (check `package.json` or `npm list claude-orchestrator`)
+- Orchestrator version: (check `package.json` or `npm list code-orchestrator`)
 
 ## Additional context
 

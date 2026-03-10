@@ -1,5 +1,5 @@
 /**
- * Example Plugin for Claude Orchestrator
+ * Example Plugin for Code Orchestrator
  *
  * Demonstrates every capability of the plugin API:
  *   - Custom validators (orch.addValidator)
