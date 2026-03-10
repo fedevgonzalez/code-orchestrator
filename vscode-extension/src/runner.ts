@@ -92,8 +92,8 @@ export class OrchestratorRunner {
       }
     } catch { /* not found */ }
 
-    // 4. Fallback: use npx (always available if npm is installed)
-    return { cmd: isWindows ? "npx.cmd" : "npx", prefix: ["code-orch"] };
+    // 4. Fallback: use npx with the npm package name (code-orchestrator)
+    return { cmd: isWindows ? "npx.cmd" : "npx", prefix: ["code-orchestrator"] };
   }
 
   /**
