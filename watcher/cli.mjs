@@ -22,7 +22,7 @@
  */
 
 import { resolve, dirname, basename } from "path";
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { execSync } from "child_process";
 import { fileURLToPath } from "url";
 
@@ -219,6 +219,11 @@ function startDaemon({ cwd, mode, specPath, prompt, flags, resume, dryRun }) {
   console.log(`  Dashboard: http://localhost:${port}`);
   console.log(`  Dev port:  ${devPort}`);
   console.log("");
+
+  // Save dashboard port so extensions/tools can discover it
+  const orchDir = resolve(cwd, ".orchestrator");
+  try { mkdirSync(orchDir, { recursive: true }); } catch {}
+  try { writeFileSync(resolve(orchDir, "dashboard-port"), String(port)); } catch {}
 
   run(pm2Cmd);
 

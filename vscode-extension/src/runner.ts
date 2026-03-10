@@ -13,6 +13,36 @@ export interface RunningInstance {
 
 export class OrchestratorRunner {
   /**
+   * Compute the dashboard port the same way the CLI does.
+   * Port = 3111 + abs(simpleHash("orch-<dirname>")) % 89
+   */
+  computePort(cwd: string): number {
+    const raw = path.basename(path.resolve(cwd));
+    const safe = raw.replace(/[^a-zA-Z0-9_-]/g, "-").replace(/-+/g, "-").slice(0, 50);
+    const name = "orch-" + (safe || "project");
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) {
+      hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0;
+    }
+    return 3111 + Math.abs(hash) % 89;
+  }
+
+  /**
+   * Discover the dashboard port for a project.
+   * Reads from .orchestrator/dashboard-port, falls back to hash computation.
+   */
+  discoverPort(cwd: string): number {
+    try {
+      const portFile = path.join(cwd, ".orchestrator", "dashboard-port");
+      if (fs.existsSync(portFile)) {
+        const port = parseInt(fs.readFileSync(portFile, "utf-8").trim(), 10);
+        if (!isNaN(port) && port > 0) return port;
+      }
+    } catch {}
+    return this.computePort(cwd);
+  }
+
+  /**
    * Check if there's already an orchestrator running for this project.
    * Returns the running instance info, or null if none found.
    */

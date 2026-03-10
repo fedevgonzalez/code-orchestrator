@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.3.1] - 2026-03-10
+## [2.4.1] - 2026-03-10
+
+### Fixed
+- **Extension dashboard port discovery** -- each project gets a dynamic port (`3111 + hash % 89`), but the extension was hardcoded to 3160. Now reads `.orchestrator/dashboard-port` with hash-based fallback
+- CLI now saves dashboard port to `.orchestrator/dashboard-port` on startup for extension/tool discovery
+
+## [2.4.0] - 2026-03-10
 
 ### Added
 - **VS Code / Cursor extension** (`vscode-extension/`) with:

@@ -66,7 +66,8 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand("codeOrch.dashboard", () => {
       const config = vscode.workspace.getConfiguration("codeOrchestrator");
-      const port = config.get<number>("dashboardPort", 3160);
+      const cwd = getWorkspaceCwd();
+      const port = cwd ? runner.discoverPort(cwd) : config.get<number>("dashboardPort", 3160);
       const token = config.get<string>("token", "");
       const url = token
         ? `http://localhost:${port}?token=${token}`
@@ -261,7 +262,7 @@ async function pollStatus(
   context: vscode.ExtensionContext
 ) {
   const config = vscode.workspace.getConfiguration("codeOrchestrator");
-  const port = config.get<number>("dashboardPort", 3160);
+  const port = runner.discoverPort(cwd);
   const token = config.get<string>("token", "");
 
   const interval = setInterval(async () => {
@@ -318,7 +319,8 @@ class DashboardWebviewProvider implements vscode.WebviewViewProvider {
     };
 
     const config = vscode.workspace.getConfiguration("codeOrchestrator");
-    const port = config.get<number>("dashboardPort", 3160);
+    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || "";
+    const port = cwd ? this.runner.discoverPort(cwd) : config.get<number>("dashboardPort", 3160);
     const token = config.get<string>("token", "");
     const tokenQuery = token ? `?token=${token}` : "";
 
