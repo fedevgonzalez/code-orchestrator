@@ -44,6 +44,7 @@ export class RefactorMode extends BaseMode {
 
   getConfigOverrides() {
     return {
+      turnTimeout: 15 * 60_000, // 15 min per task (refactoring reads/writes many files)
       maxReviewCycles: 2,
     };
   }
