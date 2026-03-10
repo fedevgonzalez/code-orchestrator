@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { OrchestratorRunner } from "./runner";
 import { RunHistoryProvider } from "./run-history";
 import { StatusBarManager } from "./status-bar";
+import { analyzeFile } from "./file-analyzer";
 
 let runner: OrchestratorRunner;
 let statusBar: StatusBarManager;
@@ -85,7 +86,7 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // Right-click file: Run with Code Orchestrator
+  // Right-click file: Run with Code Orchestrator (smart analysis)
   context.subscriptions.push(
     vscode.commands.registerCommand(
       "codeOrch.runFromFile",
@@ -96,29 +97,90 @@ export function activate(context: vscode.ExtensionContext) {
           return;
         }
 
-        const mode = await vscode.window.showQuickPick(
-          [
-            { label: "exec", description: "Execute custom prompt using file as context" },
-            { label: "build", description: "Build project from spec file" },
-            { label: "review", description: "Review code described in file" },
-            { label: "audit", description: "Audit codebase based on file" },
-            { label: "fix", description: "Fix issues described in file" },
-            { label: "feature", description: "Implement features from file" },
-            { label: "refactor", description: "Refactor based on file" },
-            { label: "test", description: "Generate tests based on file" },
-          ],
-          { placeHolder: "Select orchestration mode" }
-        );
-
-        if (!mode) return;
+        // Analyze the file to determine best approach
+        let analysis;
+        try {
+          analysis = analyzeFile(filePath);
+        } catch (err: any) {
+          vscode.window.showErrorMessage(`Failed to analyze file: ${err.message}`);
+          return;
+        }
 
         const fileName = filePath.split(/[/\\]/).pop() || "file";
-        const prompt =
-          mode.label === "build"
-            ? filePath
-            : `Read ${fileName} and execute all items described in it. File path: ${filePath}`;
+        const confidenceIcon = analysis.confidence === "high" ? "$(check)" : analysis.confidence === "medium" ? "$(info)" : "$(question)";
 
-        await startRun(mode.label, prompt, context);
+        // Build item summary for the detail view
+        const bugs = analysis.items.filter((i) => i.type === "bug");
+        const features = analysis.items.filter((i) => i.type === "feature");
+        const itemSummary = [
+          bugs.length > 0 ? `${bugs.length} bugs` : "",
+          features.length > 0 ? `${features.length} features` : "",
+          analysis.items.length - bugs.length - features.length > 0
+            ? `${analysis.items.length - bugs.length - features.length} other items`
+            : "",
+        ].filter(Boolean).join(", ");
+
+        // Show recommendation with options
+        const options = [
+          {
+            label: `${confidenceIcon} ${analysis.modeLabel} (Recommended)`,
+            description: `mode: ${analysis.mode}`,
+            detail: `${analysis.summary}${itemSummary ? ` | Found: ${itemSummary}` : ""}`,
+            isRecommended: true,
+          },
+          { label: "$(edit) Customize prompt before running", description: "Edit the generated prompt", detail: analysis.prompt.slice(0, 120) + "...", isRecommended: false },
+          { label: "---", kind: vscode.QuickPickItemKind.Separator } as any,
+          { label: "$(play) exec", description: "Custom prompt", isRecommended: false },
+          { label: "$(tools) build", description: "Build from spec", isRecommended: false },
+          { label: "$(wrench) fix", description: "Fix bugs/issues", isRecommended: false },
+          { label: "$(search) audit", description: "Audit codebase", isRecommended: false },
+          { label: "$(eye) review", description: "Review code", isRecommended: false },
+          { label: "$(references) refactor", description: "Refactor code", isRecommended: false },
+          { label: "$(beaker) test", description: "Generate tests", isRecommended: false },
+          { label: "$(star) feature", description: "Implement features", isRecommended: false },
+        ];
+
+        const pick = await vscode.window.showQuickPick(options, {
+          placeHolder: `Analyzing ${fileName}...`,
+          title: "Code Orchestrator — Smart Analysis",
+        });
+
+        if (!pick) return;
+
+        let mode: string;
+        let prompt: string;
+
+        if ((pick as any).isRecommended === true) {
+          // Use AI recommendation
+          mode = analysis.mode;
+          prompt = analysis.prompt;
+        } else if (pick.label.includes("Customize")) {
+          // Let user edit the prompt
+          const edited = await vscode.window.showInputBox({
+            prompt: `Edit prompt (mode: ${analysis.mode})`,
+            value: analysis.prompt,
+            valueSelection: undefined,
+          });
+          if (!edited) return;
+          mode = analysis.mode;
+          prompt = edited;
+        } else {
+          // Manual mode selection
+          const modeMatch = pick.label.match(/\)\s*(\w+)$/);
+          mode = modeMatch ? modeMatch[1] : "exec";
+          if (mode === "build") {
+            prompt = filePath;
+          } else {
+            const userPrompt = await vscode.window.showInputBox({
+              prompt: `Enter ${mode} prompt (file: ${fileName})`,
+              value: `Read ${fileName} at ${filePath} and execute all items described in it.`,
+            });
+            if (!userPrompt) return;
+            prompt = userPrompt;
+          }
+        }
+
+        await startRun(mode, prompt, context);
       }
     )
   );
@@ -138,6 +200,34 @@ async function startRun(
   if (!cwd) {
     vscode.window.showErrorMessage("Open a workspace folder first.");
     return;
+  }
+
+  // Check for existing running instance
+  const existing = runner.checkRunning(cwd);
+  if (existing) {
+    const action = await vscode.window.showWarningMessage(
+      `An orchestrator is already running for this project.\n\n` +
+        `Instance: ${existing.name} (PID ${existing.pid})\n` +
+        `Status: ${existing.status} | Uptime: ${existing.uptime} | Memory: ${existing.memory}\n\n` +
+        `Starting a new run will stop the current one.`,
+      { modal: true },
+      "Stop & Start New Run",
+      "Open Dashboard Instead"
+    );
+
+    if (action === "Open Dashboard Instead") {
+      vscode.commands.executeCommand("codeOrch.dashboard");
+      return;
+    }
+    if (action !== "Stop & Start New Run") {
+      return; // Cancelled
+    }
+
+    // Stop the existing instance first
+    statusBar.setRunning("stopping...");
+    await runner.stop(cwd);
+    // Brief pause to let PM2 clean up
+    await new Promise((r) => setTimeout(r, 2000));
   }
 
   const config = vscode.workspace.getConfiguration("codeOrchestrator");

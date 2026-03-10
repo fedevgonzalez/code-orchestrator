@@ -1,7 +1,57 @@
-import { spawn } from "child_process";
+import { spawn, execSync } from "child_process";
 import * as http from "http";
+import * as path from "path";
+
+export interface RunningInstance {
+  name: string;
+  pid: number;
+  status: string;
+  uptime: string;
+  memory: string;
+}
 
 export class OrchestratorRunner {
+  /**
+   * Check if there's already an orchestrator running for this project.
+   * Returns the running instance info, or null if none found.
+   */
+  checkRunning(cwd: string): RunningInstance | null {
+    try {
+      const raw = path.basename(path.resolve(cwd));
+      const safe = raw.replace(/[^a-zA-Z0-9_-]/g, "-").replace(/-+/g, "-").slice(0, 50);
+      const expectedName = "orch-" + (safe || "project");
+
+      const output = execSync("npx pm2 jlist", {
+        windowsHide: true,
+        stdio: ["pipe", "pipe", "pipe"],
+        timeout: 10000,
+      }).toString();
+
+      const processes: any[] = JSON.parse(output);
+      const match = processes.find(
+        (p) => p.name === expectedName && p.pm2_env?.status === "online"
+      );
+
+      if (!match) return null;
+
+      const uptimeMs = Date.now() - (match.pm2_env?.pm_uptime || Date.now());
+      const uptimeMin = Math.floor(uptimeMs / 60000);
+      const uptimeStr = uptimeMin >= 60
+        ? `${Math.floor(uptimeMin / 60)}h ${uptimeMin % 60}m`
+        : `${uptimeMin}m`;
+
+      return {
+        name: match.name,
+        pid: match.pid,
+        status: match.pm2_env?.status || "unknown",
+        uptime: uptimeStr,
+        memory: `${Math.round((match.monit?.memory || 0) / 1024 / 1024)}MB`,
+      };
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * Start an orchestrator run via the CLI.
    */
