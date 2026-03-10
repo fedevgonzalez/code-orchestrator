@@ -86,7 +86,7 @@ ${specText.slice(0, 6000)}
 IMPORTANT CONTEXT:
 - Projects may use "nextspark" (npx create-nextspark-app) as a starter template. If the spec mentions nextspark, set scaffoldCommand to "npx create-nextspark-app".
 - If the spec does NOT mention a specific scaffold tool, use "npx create-next-app@latest".
-- ALWAYS use PostgreSQL as the database (never SQLite). The database is hosted at postgres.lab. Connection string format: DATABASE_URL="postgresql://dbuser:dbpass_SecurePassword123@postgres.lab:5432/{projectName}?sslmode=disable". Use Drizzle ORM with postgres adapter (drizzle-orm + postgres or @neondatabase/serverless).
+- Use PostgreSQL as the default database. If DATABASE_URL is set in .env, use that. Otherwise, use localhost:5432. Use Drizzle ORM with postgres adapter (drizzle-orm + pg).
 - The orchestrator will handle: seed data, landing page, SEO, legal pages, email templates, analytics, security, screenshots, Lighthouse audit, and launch assets automatically. Focus the plan on the CORE business logic.
 
 You must return ONLY valid JSON (no markdown, no explanation) with this exact structure:
@@ -126,7 +126,7 @@ function createPhasesWithTasks(analysis, specText, cwd) {
   const isNextSpark = analysis.scaffoldCommand?.includes("nextspark") ||
     specText.toLowerCase().includes("nextspark");
 
-  // Build phase list — database always included (PostgreSQL at postgres.lab)
+  // Build phase list — database always included
   const phases = [];
   for (const tmpl of PHASE_TEMPLATES) {
     if (tmpl.id === "auth" && !hasAuth) continue;
@@ -167,10 +167,9 @@ Generate 3-6 tasks PER PHASE. Each task prompt must be VERY specific: file paths
 Include validation: "check file: path1, path2" or "run: npm test" or "run: npm run build"
 
 DATABASE CONFIG — use this for ALL database tasks:
-- PostgreSQL hosted at postgres.lab
-- DATABASE_URL="postgresql://dbuser:dbpass_SecurePassword123@postgres.lab:5432/${projectName}?sslmode=disable"
-- ORM: Drizzle ORM with drizzle-orm + postgres (pg) adapter
-- The database "${projectName}" will be created automatically. The scaffold task should include creating the DB via: psql -h postgres.lab -U dbuser -c "CREATE DATABASE ${projectName};" (password: dbpass_SecurePassword123)
+- PostgreSQL (use DATABASE_URL from .env, or default to postgresql://postgres:postgres@localhost:5432/${projectName})
+- ORM: Drizzle ORM with drizzle-orm + pg adapter
+- The scaffold task should create the database if it doesn't exist
 - Add DATABASE_URL to .env and .env.example
 
 PHASE-SPECIFIC INSTRUCTIONS — follow these EXACTLY:
@@ -193,36 +192,27 @@ NextSpark projects have a SPECIFIC directory structure. DO NOT use src/app. Use 
 For web+mobile (monorepo): web/ contains the Next.js app, mobile/ contains Expo/React Native, shared/ has shared code.
 If NOT using nextspark, use standard Next.js structure with src/app/.
 
-NEXTSPARK PLUGINS — ALWAYS install these when using nextspark:
-Available plugins are at G:/GitHub/nextspark/repo/plugins/. Install by copying to contents/plugins/ and registering in theme config.
+NEXTSPARK PLUGINS — install when using nextspark:
+If the project uses nextspark, install plugins via: pnpm add @nextsparkjs/plugin-{name}, register in theme config, and run "node core/scripts/build/registry.mjs".
 
-1. **walkme** (ALWAYS install): Guided tours and onboarding system. Install: copy G:/GitHub/nextspark/repo/plugins/walkme/ to contents/plugins/walkme/, register in theme config, then create tours for:
-   - "getting-started" tour: welcome modal → sidebar tooltip → main feature spotlight → completion modal
-   - Contextual tooltips on first visit to each major section (dashboard, settings, etc)
-   - Onboarding checklist that tracks completion (e.g., "Set up profile", "Add first item", etc)
-   Steps: pnpm add @nextsparkjs/plugin-walkme OR copy manually, add 'walkme' to themeConfig.plugins, run "node core/scripts/build/registry.mjs", define tours in app/dashboard/ pages.
-
-2. **ai** (install if spec mentions AI features, smart suggestions, content generation, or automation): Multi-model AI plugin with OpenAI/Anthropic/Ollama support. Install: copy G:/GitHub/nextspark/repo/plugins/ai/ to contents/plugins/ai/, configure .env with API keys, register in theme config.
-
-3. **amplitude** (install if spec mentions analytics — use alongside PostHog): Analytics plugin.
-
-4. **social-media-publisher** (install if spec mentions social features or content publishing): Social media integration.
-
-5. **langchain** (install if spec mentions advanced AI workflows, RAG, or embeddings): LangChain integration.
+1. **walkme** (ALWAYS install): Guided tours and onboarding system. Create tours for getting-started, contextual tooltips, and onboarding checklists.
+2. **ai** (if spec mentions AI features): Multi-model AI plugin with OpenAI/Anthropic/Ollama support.
+3. **amplitude** (if spec mentions analytics): Analytics plugin.
+4. **social-media-publisher** (if spec mentions social features): Social media integration.
+5. **langchain** (if spec mentions RAG or embeddings): LangChain integration.
 
 **scaffold**: Initialize the project. If using nextspark, run "npx create-nextspark-app" — this AUTO-GENERATES: auth pages (login, signup, forgot-password, reset-password, verify-email), dashboard scaffold, superadmin panel, devtools, plugin system, theme system, better-auth config, Drizzle ORM setup, permissions system, i18n, .claude/skills, .claude/agents, and all the base structure. DO NOT recreate any of these — they already exist after scaffold.
 
 CRITICAL — .env configuration (THIS WILL BE VALIDATED AUTOMATICALLY):
-After scaffolding, you MUST update the .env file with these EXACT values:
-1. DATABASE_URL="postgresql://dbuser:dbpass_SecurePassword123@postgres.lab:5432/${projectName}?sslmode=disable"
-2. BETTER_AUTH_SECRET — generate a real secret by running: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))" and paste the output as the value
+After scaffolding, you MUST update the .env file:
+1. DATABASE_URL — set to your PostgreSQL connection string (e.g., postgresql://user:pass@localhost:5432/${projectName})
+2. BETTER_AUTH_SECRET — generate a real secret: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 3. Do NOT leave any placeholder values like "your-secret-key-here", "user:password", "sk_test_...", etc.
-4. Do NOT use localhost, neon.tech, supabase, or any other database provider — ONLY postgres.lab
-The .env will be automatically validated after this phase. If it has placeholders or wrong credentials, the phase will FAIL and you will be asked to fix it.
+The .env will be automatically validated after this phase.
 
-Also install drizzle-orm and pg. Create the database on postgres.lab by running: PGPASSWORD=dbpass_SecurePassword123 psql -h postgres.lab -U dbuser -c "CREATE DATABASE ${projectName};" 2>/dev/null || echo "DB may already exist"
+Also install drizzle-orm and pg. Create the database if needed.
 
-**database**: If using nextspark, Drizzle ORM is already configured — only CREATE the business-specific entity schemas (e.g., cars, reservations, payments) following the nextspark entity-system skill conventions. Generate migrations and push to postgres.lab with "npx drizzle-kit push". Verify tables exist. If NOT using nextspark, set up Drizzle from scratch with ALL schemas.
+**database**: If using nextspark, Drizzle ORM is already configured — only CREATE the business-specific entity schemas. Generate migrations and push with "npx drizzle-kit push". Verify tables exist. If NOT using nextspark, set up Drizzle from scratch with ALL schemas.
 
 **auth**: If using nextspark, auth pages and better-auth are ALREADY scaffolded — only ADD Google OAuth provider config to the existing better-auth setup, verify middleware is protecting dashboard routes, and ensure the auth flow works end-to-end. If NOT using nextspark, create from scratch: login page, register page, forgot password page, NextAuth/better-auth config with Google provider, middleware for protected routes, session provider wrapper.
 

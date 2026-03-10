@@ -675,12 +675,6 @@ function checkEnvFile(cwd) {
     if (dbUrl.includes("user:password") || dbUrl.includes("username:password")) {
       issues.push("DATABASE_URL has placeholder credentials (user:password)");
     }
-    if (dbUrl.includes("localhost") && !dbUrl.includes("postgres.lab")) {
-      issues.push("DATABASE_URL points to localhost instead of postgres.lab");
-    }
-    if (dbUrl.includes("neon.tech") || dbUrl.includes("supabase") || dbUrl.includes("planetscale")) {
-      issues.push("DATABASE_URL points to external provider instead of postgres.lab");
-    }
   }
 
   // Check BETTER_AUTH_SECRET
@@ -713,9 +707,9 @@ function buildEnvFixPrompt(issues, cwd) {
     lines.push(`- ${issue}`);
   }
   lines.push("\nREQUIRED VALUES:");
-  lines.push('- DATABASE_URL must be: postgresql://dbuser:dbpass_SecurePassword123@postgres.lab:5432/{project_name}?sslmode=disable');
+  lines.push('- DATABASE_URL must be a valid PostgreSQL connection string (e.g., postgresql://user:pass@localhost:5432/mydb)');
   lines.push('- BETTER_AUTH_SECRET must be a real random secret. Generate one with: openssl rand -base64 32');
-  lines.push("- Do NOT use placeholders, localhost, or external providers (neon, supabase, etc)");
+  lines.push("- Do NOT use placeholders like 'your-secret-here' or 'user:password'");
   lines.push("\nUpdate the .env file NOW with the correct values.");
   return lines.join("\n");
 }
@@ -766,7 +760,7 @@ async function checkDbConnection(cwd) {
       type: "db-connect",
       ok: false,
       message: `Cannot reach database at ${host}:${port}`,
-      fixPrompt: `The database at ${host}:${port} is not reachable. Check that:\n1. postgres.lab is in the hosts file (192.168.68.100 postgres.lab)\n2. PostgreSQL is running on that host\n3. Port 5432 is accessible\n\nUpdate DATABASE_URL in .env to point to a reachable PostgreSQL instance.`,
+      fixPrompt: `The database at ${host}:${port} is not reachable. Check that:\n1. PostgreSQL is running on that host\n2. Port ${port} is accessible\n3. The hostname resolves correctly\n\nUpdate DATABASE_URL in .env to point to a reachable PostgreSQL instance.`,
     };
   }
 
@@ -789,7 +783,7 @@ async function checkDbConnection(cwd) {
       type: "db-connect",
       ok: false,
       message: `Database TCP reachable but auth/query failed: ${errMsg}`,
-      fixPrompt: `Database at ${host}:${port} is reachable but the connection failed. Check credentials in DATABASE_URL. Expected format: postgresql://dbuser:dbpass_SecurePassword123@postgres.lab:5432/{db_name}?sslmode=disable`,
+      fixPrompt: `Database at ${host}:${port} is reachable but the connection failed. Check credentials in DATABASE_URL. Expected format: postgresql://user:password@host:5432/dbname`,
     };
   }
 }
@@ -874,7 +868,7 @@ function checkOnboardingFiles(cwd) {
     ok: false,
     message: `Onboarding not implemented — found only ${found.length} related files`,
     fixPrompt: `The onboarding/walkme system was not implemented. You MUST create:
-1. Install walkme plugin: copy G:/GitHub/nextspark/repo/plugins/walkme/ to contents/plugins/walkme/ and register in theme config
+1. Install walkme plugin: pnpm add @nextsparkjs/plugin-walkme, register in theme config
 2. Create onboarding files in contents/themes/{theme}/onboarding/:
    - tours.ts — Tour definitions (getting-started tour + contextual tooltips)
    - selectors.ts — TOUR_TARGETS mapping semantic names to data-cy selectors
@@ -882,9 +876,7 @@ function checkOnboardingFiles(cwd) {
    - OnboardingWrapper.tsx — Layout wrapper with provider + resume banner
    - index.ts — Exports
 3. Add the OnboardingWrapper to the dashboard layout
-4. Create at least a "getting-started" multi-step tour
-
-Reference implementation is at G:/GitHub/claude-orchestrator/watcher/reference/nextspark-onboarding/`,
+4. Create at least a "getting-started" multi-step tour`,
   };
 }
 
@@ -971,7 +963,7 @@ function checkSeedFiles(cwd) {
    - Include 15-30 records per entity with varied statuses and dates
    - Make it idempotent (safe to run multiple times — upsert or check before insert)
 2. Add "seed" or "db:seed" script to package.json that runs the seed file
-3. The seed should use the DATABASE_URL from .env to connect to postgres.lab`,
+3. The seed should use the DATABASE_URL from .env to connect to the database`,
   };
 }
 

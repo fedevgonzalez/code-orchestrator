@@ -2,7 +2,7 @@
  * PM2 Ecosystem Config — Claude Orchestrator
  *
  * Usage:
- *   set ORCH_CWD=G:/GitHub/mi-proyecto && set ORCH_SPEC=G:/GitHub/mi-proyecto/spec.md && npx pm2 start ecosystem.config.cjs
+ *   set ORCH_CWD=/path/to/project && set ORCH_SPEC=/path/to/project/spec.md && npx pm2 start ecosystem.config.cjs
  *
  * Control:
  *   npx pm2 logs claude-orchestrator
@@ -18,7 +18,7 @@ const SPEC_PATH = process.env.ORCH_SPEC;
 if (!PROJECT_CWD || !SPEC_PATH) {
   console.error("ERROR: Set ORCH_CWD and ORCH_SPEC environment variables first.");
   console.error("Example:");
-  console.error('  set ORCH_CWD=G:/GitHub/mi-proyecto && set ORCH_SPEC=G:/GitHub/mi-proyecto/spec.md && npx pm2 start ecosystem.config.cjs');
+  console.error('  set ORCH_CWD=/path/to/project && set ORCH_SPEC=/path/to/project/spec.md && npx pm2 start ecosystem.config.cjs');
   process.exit(1);
 }
 
