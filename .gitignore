@@ -14,4 +14,3 @@ Thumbs.db
 *.lock
 .claude
 _docs/
-/vscode-extension
