@@ -71,34 +71,8 @@ export const DEFAULT_CONFIG = {
   // Dashboard
   dashboardPort: 3111,
 
-  // Interactive prompt rules
-  interactiveRules: {
-    "Would you like to use TypeScript": "Yes",
-    "Would you like to use ESLint": "Yes",
-    "Would you like to use Tailwind CSS": "Yes",
-    "Would you like to use `src/` directory": "Yes",
-    "Would you like to use App Router": "Yes",
-    "Would you like to use Turbopack": "No",
-    "Would you like to customize the import alias": "No",
-    "Select a preset": "saas",
-    "Select a theme": "default",
-    "Select project type": "web",
-    "Select team mode": "multi-tenant",
-    "Select billing model": "freemium",
-    "Initialize git repository": "y",
-    "Packages: +": "y",
-    "package manager": "pnpm",
-    "Ok to proceed": "y",
-    "Need to install the following packages": "y",
-    "Is this OK": "y",
-    "(y/N)": "y",
-    "(Y/n)": "y",
-    "Press Enter to continue": "",
-    "press ENTER": "",
-    "Overwrite": "y",
-    "Continue?": "y",
-    "Proceed": "y",
-  },
+  // Permissions — set to false to require Claude's built-in permission prompts
+  allowUnsafePermissions: true,
 };
 
 /** Create a fresh task object */

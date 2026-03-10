@@ -119,7 +119,7 @@ export function createRunRecord(orchestrator, restarts = 0) {
     totalTasks,
     completedTasks,
     failedTasks,
-    totalCostUsd: 0, // TODO: aggregate from task results
+    totalCostUsd: orchestrator.totalCostUsd || 0,
     restarts,
     avgReviewScore: scoredTasks > 0 ? Math.round((totalScore / scoredTasks) * 10) / 10 : 0,
   };

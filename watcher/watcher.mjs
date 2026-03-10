@@ -132,7 +132,10 @@ const httpServer = createServer((req, res) => {
 
   // Serve dashboard HTML
   if (req.url === "/" && req.method === "GET") {
-    const dashboardPath = join(__dirname, "..", "dashboard", "static", "index.html");
+    // Try local (npm package) first, then repo layout
+    const dashboardPath = existsSync(join(__dirname, "dashboard", "index.html"))
+      ? join(__dirname, "dashboard", "index.html")
+      : join(__dirname, "..", "dashboard", "static", "index.html");
     if (existsSync(dashboardPath)) {
       res.writeHead(200, { ...headers, "Content-Type": "text/html" });
       res.end(readFileSync(dashboardPath, "utf-8"));
@@ -405,6 +408,7 @@ console.log(`  Dashboard:    http://localhost:${PORT}`);
 console.log(`  Dev server:   port ${DEV_PORT}`);
 console.log(`  Max restarts: ${MAX_RESTARTS}`);
 console.log(`  Review:       ${args["no-review"] ? "DISABLED" : "ENABLED"}`);
+console.log(`  Permissions:  ${projectConfig.allowUnsafePermissions === false ? "SAFE (Claude will ask)" : "AUTO (--dangerously-skip-permissions)"}`);
 console.log("");
 
 httpServer.listen(PORT, async () => {

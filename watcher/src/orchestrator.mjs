@@ -75,6 +75,9 @@ export class Orchestrator {
     this.sessionId = null;
     this._firstCall = true;
 
+    // Cost tracking
+    this.totalCostUsd = 0;
+
     // Resume flag
     this._resume = opts.resume || false;
   }
@@ -212,11 +215,13 @@ export class Orchestrator {
       firstCall: this._firstCall,
       timeoutMs: timeout,
       onStderr: this.verbose ? (data) => process.stderr.write(`[CLAUDE] ${data}`) : null,
+      allowUnsafe: this.config.allowUnsafePermissions !== false,
     });
 
     this._firstCall = false;
     const elapsed = Math.floor((Date.now() - start) / 1000);
-    console.log(`[ORCH] Response received (${elapsed}s, cost: $${result.costUsd.toFixed(4)})`);
+    this.totalCostUsd += result.costUsd || 0;
+    console.log(`[ORCH] Response received (${elapsed}s, cost: $${result.costUsd.toFixed(4)}, total: $${this.totalCostUsd.toFixed(4)})`);
 
     // Update session ID if Claude returned a different one
     if (result.sessionId && result.sessionId !== this.sessionId) {
@@ -246,10 +251,17 @@ export class Orchestrator {
     const toolId = this._writeToolStart("execute_task", `${taskLabel}: ${task.prompt.slice(0, 80)}`);
 
     // Run the task prompt via claude -p
-    const result = await this._runPrompt(task.prompt);
+    let taskFailed = false;
+    try {
+      await this._runPrompt(task.prompt);
+    } catch (e) {
+      console.error(`[TASK] ${taskLabel}: Claude call failed: ${e.message}`);
+      taskFailed = true;
+    }
 
     // Validation
-    if (task.validate) {
+    let validationPassed = true;
+    if (task.validate && !taskFailed) {
       console.log(`[TASK] ${taskLabel}: Validating...`);
       const validation = runValidation(task, this.cwd);
       const valResult = validation instanceof Promise ? await validation : validation;
@@ -266,6 +278,7 @@ export class Orchestrator {
         const retryResult = retry instanceof Promise ? await retry : retry;
         if (!retryResult.ok) {
           console.log(`[TASK] ${taskLabel}: Validation still failing after fix: ${retryResult.message}`);
+          validationPassed = false;
         }
       } else {
         console.log(`[TASK] ${taskLabel}: Validation passed: ${valResult.message}`);
@@ -305,8 +318,12 @@ export class Orchestrator {
           } else {
             console.log(`[TASK] ${taskLabel}: Review REJECTED (score: ${task.reviewScore}), fixing...`);
             task.status = TaskStatus.FIXING;
-            await this._runPrompt("Fix the issues you identified in your review above. Make sure all code is correct and complete.");
-            task.reviewScore = Math.max(task.reviewScore, 7);
+            await this._runPrompt(
+              `Fix the issues you identified in your review above: ${(review.issues || []).join("; ")}. ` +
+              `Make sure all code is correct and complete.`
+            );
+            task.reviewCycles++;
+            // Don't fake the score — it stays at the real value
           }
         } catch {
           console.log(`[TASK] ${taskLabel}: Could not parse review JSON, assuming OK`);
@@ -318,6 +335,15 @@ export class Orchestrator {
         task.reviewScore = 7;
         task.reviewCycles = 1;
       }
+    }
+
+    if (taskFailed) {
+      task.status = TaskStatus.FAILED;
+      task.error = "Claude call failed";
+      this._emit("task_failed", { taskId: task.id });
+      this._writeToolEnd(toolId, `${taskLabel} FAILED`);
+      console.log(`[TASK] ${taskLabel}: FAILED`);
+      return false;
     }
 
     task.status = TaskStatus.DONE;

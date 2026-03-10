@@ -57,6 +57,7 @@ export function runClaudePrompt(prompt, cwd, opts = {}) {
     onStderr = null,
     maxTurns = null,
     verbose = false,
+    allowUnsafe = true, // Set to false to require Claude's built-in permission prompts
   } = opts;
 
   const claudeBin = findClaudeBinary();
@@ -65,8 +66,13 @@ export function runClaudePrompt(prompt, cwd, opts = {}) {
     "-p",
     prompt,
     "--output-format", "json",
-    "--dangerously-skip-permissions",
   ];
+
+  // Skip permission prompts (required for autonomous operation)
+  // Users can disable this via config: { allowUnsafePermissions: false }
+  if (allowUnsafe) {
+    args.push("--dangerously-skip-permissions");
+  }
 
   if (sessionId) {
     if (firstCall) {

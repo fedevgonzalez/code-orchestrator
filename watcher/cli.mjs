@@ -238,7 +238,16 @@ function getArgAfter(flag) {
 }
 
 function shellEscape(str) {
-  return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$').replace(/`/g, '\\`');
+  // Escape all shell-special characters for safe embedding in double quotes
+  return str
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\$/g, '\\$')
+    .replace(/`/g, '\\`')
+    .replace(/!/g, '\\!')
+    .replace(/%/g, '%%')   // Windows cmd.exe
+    .replace(/\n/g, ' ')   // Newlines → space (prevent injection)
+    .replace(/\r/g, '');
 }
 
 function simpleHash(str) {
@@ -250,7 +259,15 @@ function simpleHash(str) {
 }
 
 function run(cmd) {
-  try { execSync(cmd, { cwd: __dirname, stdio: "inherit" }); } catch {}
+  try {
+    execSync(cmd, { cwd: __dirname, stdio: "inherit" });
+  } catch (e) {
+    console.error(`\n  ERROR: Command failed. Is PM2 installed?`);
+    console.error(`  Install it with: npm install -g pm2`);
+    console.error(`  Command was: ${cmd.slice(0, 120)}`);
+    if (e.stderr) console.error(`  ${e.stderr.toString().slice(0, 200)}`);
+    process.exit(1);
+  }
 }
 
 function showHelp() {
