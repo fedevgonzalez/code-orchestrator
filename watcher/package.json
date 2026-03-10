@@ -1,6 +1,6 @@
 {
   "name": "claude-orchestrator",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Autonomous multi-mode developer tool powered by Claude Code. Build, fix, audit, test, review, refactor — all with automatic code review and crash recovery.",
   "main": "watcher.mjs",
   "type": "module",
@@ -43,6 +43,7 @@
   "files": [
     "cli.mjs",
     "watcher.mjs",
+    "watchdog.mjs",
     "src/",
     "dashboard/",
     "examples/",
@@ -57,8 +58,5 @@
     "@jest/globals": "^29.7.0",
     "jest": "^29.7.0"
   },
-  "optionalDependencies": {
-    "node-pty": "^1.0.0",
-    "pg": "^8.20.0"
-  }
+  "optionalDependencies": {}
 }

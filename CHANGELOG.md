@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-03-10
+
+### Added
+- **SECURITY.md** -- documents security model, permission modes, and responsible disclosure
+- **Cost guidance** in README with per-mode estimates
+- **"Why This Tool?"** section and comparison table in README
+
+### Fixed
+- **CRITICAL: Command injection** -- sanitized PM2 instance names (cli.mjs), task validation commands (validator.mjs), gate check commands (orchestrator.mjs), and database connection strings (validator.mjs)
+- **Plugin validators not invoked** -- custom validators registered via `addValidator()` are now executed during phase validation
+- **Mode validators dead code** -- `getValidators()` returns from mode classes are now wired into phase validation
+- **Parallel session race condition** -- parallel tasks now use isolated Claude sessions instead of sharing `this.sessionId`
+- **CORS wildcard** -- dashboard API now restricts CORS to localhost origins only
+
+### Changed
+- Removed dead code: `reviewTask()`, `finalReview()`, `parseReviewJson()` from reviewer.mjs (inline review in orchestrator replaced them)
+- Removed unused `optionalDependencies` (`node-pty`, `pg`) from package.json
+- `runPhaseValidation()` now accepts optional `pluginRegistry` parameter for end-to-end plugin validator support
+
 ## [2.1.0] - 2026-03-10
 
 ### Added

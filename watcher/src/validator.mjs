@@ -51,6 +51,10 @@ function checkFiles(validation, cwd) {
 
 function runCommand(validation, cwd) {
   const cmd = validation.replace("run:", "").trim();
+  // Reject commands with shell metacharacters that could enable injection
+  if (/[;&|`$()]/.test(cmd) && !cmd.startsWith("npm ") && !cmd.startsWith("npx ")) {
+    return { ok: false, message: `Command rejected — contains shell metacharacters: ${cmd.slice(0, 80)}` };
+  }
   try {
     execSync(cmd, { cwd, stdio: "pipe", timeout: BUILD_TIMEOUT, encoding: "utf-8" });
     return { ok: true, message: `Command succeeded: ${cmd}` };
@@ -139,12 +143,14 @@ const PHASE_VALIDATORS = {
  * @param {object} [config] - Override defaults
  * @returns {Promise<{ok: boolean, results: Array}>}
  */
-export async function runPhaseValidation(phaseId, cwd, config = {}) {
+export async function runPhaseValidation(phaseId, cwd, config = {}, pluginRegistry = null) {
   // Normalize phase ID: "Project Scaffolding" -> "scaffold", "Core API & Business Logic" -> "core-api"
   const normalizedId = normalizePhaseId(phaseId);
-  const validators = PHASE_VALIDATORS[normalizedId];
+  const builtinValidators = PHASE_VALIDATORS[normalizedId] || [];
+  const pluginValidators = pluginRegistry?.getPhaseValidators(normalizedId) || [];
+  const validators = [...builtinValidators, ...pluginValidators];
 
-  if (!validators) {
+  if (validators.length === 0) {
     console.log(`[VALIDATE] No validators mapped for phase: ${phaseId} (normalized: ${normalizedId})`);
     return { ok: true, results: [] };
   }
@@ -153,6 +159,14 @@ export async function runPhaseValidation(phaseId, cwd, config = {}) {
   const results = [];
 
   for (const v of validators) {
+    // Check if this is a plugin-registered validator
+    if (pluginRegistry?.hasValidator(v)) {
+      const result = await pluginRegistry.runValidator(v, cwd, config);
+      results.push(result);
+      console.log(`[VALIDATE]   ${result.type}: ${result.ok ? "PASS" : "FAIL"} — ${result.message}`);
+      continue;
+    }
+
     let result;
     switch (v) {
       case "env-check":
@@ -797,13 +811,15 @@ async function checkDbConnection(cwd) {
     };
   }
 
-  // Try a real connection via drizzle-kit or psql to verify auth works
+  // Try a real connection via pg to verify auth works
+  // Uses execFileSync with env var to avoid command injection via DATABASE_URL
   try {
-    execSync(`node -e "const{Client}=require('pg');(async()=>{const c=new Client({connectionString:'${dbUrl.replace(/'/g, "\\'")}',connectionTimeoutMillis:5000});await c.connect();await c.query('SELECT 1');await c.end();console.log('OK')})()"`, {
+    execSync(`node -e "const{Client}=require('pg');(async()=>{const c=new Client({connectionString:process.env.__DB_URL,connectionTimeoutMillis:5000});await c.connect();await c.query('SELECT 1');await c.end();console.log('OK')})()"`, {
       cwd,
       stdio: "pipe",
       timeout: 10_000,
       encoding: "utf-8",
+      env: { ...process.env, __DB_URL: dbUrl },
     });
     return { type: "db-connect", ok: true, message: `Database connected successfully (${host}:${port})` };
   } catch (e) {

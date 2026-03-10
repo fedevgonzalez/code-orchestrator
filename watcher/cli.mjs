@@ -65,6 +65,21 @@ if (rawArgs.includes("--restart")) {
   process.exit(0);
 }
 
+if (rawArgs.includes("--install-watchdog")) {
+  run(`node "${resolve(__dirname, "watchdog.mjs")}" --install`);
+  process.exit(0);
+}
+
+if (rawArgs.includes("--uninstall-watchdog")) {
+  run(`node "${resolve(__dirname, "watchdog.mjs")}" --uninstall`);
+  process.exit(0);
+}
+
+if (rawArgs.includes("--watchdog-status")) {
+  run(`node "${resolve(__dirname, "watchdog.mjs")}" --status`);
+  process.exit(0);
+}
+
 if (rawArgs.includes("--resume")) {
   const cwdArg = getArgAfter("--resume");
   if (!cwdArg || !existsSync(cwdArg)) {
@@ -207,6 +222,9 @@ function startDaemon({ cwd, mode, specPath, prompt, flags, resume, dryRun }) {
 
   run(pm2Cmd);
 
+  // Save PM2 state so watchdog can resurrect after reboot
+  try { execSync("npx pm2 save", { cwd: __dirname, stdio: "ignore" }); } catch {}
+
   console.log("");
   console.log("  Running in background. You can close this terminal.");
   console.log("");
@@ -231,7 +249,10 @@ function getDefaultPrompt(mode) {
 }
 
 function instanceName(cwd) {
-  return "orch-" + basename(resolve(cwd));
+  // Sanitize to alphanumeric + hyphens to prevent command injection via directory names
+  const raw = basename(resolve(cwd));
+  const safe = raw.replace(/[^a-zA-Z0-9_-]/g, "-").replace(/-+/g, "-").slice(0, 50);
+  return "orch-" + (safe || "project");
 }
 
 function getArgAfter(flag) {
@@ -302,6 +323,11 @@ function showHelp() {
     node cli.mjs --stop [name]                         Stop instance
     node cli.mjs --stop-all                            Stop everything
     node cli.mjs --restart [name]                      Restart instance
+
+  Watchdog (auto-recovery after reboot/crash):
+    node cli.mjs --install-watchdog                    Register system watchdog
+    node cli.mjs --uninstall-watchdog                  Remove system watchdog
+    node cli.mjs --watchdog-status                     Check watchdog status
 
   Options:
     --cwd <dir>        Project directory (default: current)

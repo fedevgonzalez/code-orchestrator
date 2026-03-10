@@ -1,11 +1,27 @@
 # Claude Orchestrator
 
-Autonomous multi-phase development tool that orchestrates Claude Code CLI (`claude -p`) to execute complex tasks from start to finish.
+**Give Claude a spec. Get a reviewed codebase back.**
+
+Claude Orchestrator turns Claude Code into an autonomous multi-phase build system. It analyzes your project, generates a phased execution plan, runs each task via `claude -p`, self-reviews and scores every output, auto-fixes failures, and validates the result -- all with crash recovery and real-time monitoring.
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js 18+](https://img.shields.io/badge/node-18%2B-green.svg)](https://nodejs.org)
+[![npm](https://img.shields.io/npm/v/claude-orchestrator)](https://www.npmjs.com/package/claude-orchestrator)
 
 ---
+
+## Why This Tool?
+
+Claude Code is powerful, but for large tasks it needs structure: phased plans, automatic validation, crash recovery, and self-review. Claude Orchestrator provides that structure.
+
+| | Claude Code (raw) | Claude Orchestrator |
+|---|---|---|
+| Execution | Single prompt | Multi-phase plan with dependencies |
+| Review | Manual | Auto-review + scoring (1-10) + auto-fix |
+| Crash recovery | None | Checkpoint after every task, auto-restart |
+| Validation | Manual | Build, test, E2E, custom validators per phase |
+| Monitoring | Terminal output | Real-time WebSocket dashboard |
+| Modes | General purpose | 8 specialized modes (build, fix, audit...) |
 
 ## Key Features
 
@@ -124,6 +140,18 @@ claude-orch --restart myproject   # restart an instance
 claude-orch --resume /path/to    # resume from checkpoint
 ```
 
+### Auto-Recovery (Watchdog)
+
+Install the system watchdog so orchestrator processes automatically restart after a reboot or crash:
+
+```bash
+claude-orch --install-watchdog    # register system-level auto-recovery
+claude-orch --watchdog-status     # check if watchdog is active
+claude-orch --uninstall-watchdog  # remove the watchdog
+```
+
+On Windows this creates a scheduled task that runs on logon. On Linux/macOS it adds a cron job (every 10 minutes). The watchdog calls `pm2 resurrect` to restore any saved orchestrator processes.
+
 ## Configuration
 
 ### Project Config File
@@ -200,6 +228,9 @@ Config files are searched in this order: `.orchestrator.config.mjs`, `.orchestra
 | `--stop-all` | Stop all instances |
 | `--restart [name]` | Restart an instance |
 | `--resume <project-dir>` | Resume from a saved checkpoint |
+| `--install-watchdog` | Register system watchdog for auto-recovery after reboot |
+| `--uninstall-watchdog` | Remove the system watchdog |
+| `--watchdog-status` | Check if watchdog is active |
 
 ## Dashboard
 
@@ -401,6 +432,23 @@ See [spec.example.md](spec.example.md) for a complete example.
 - **Linux/macOS**: Claude CLI resolved via PATH
 - Each `claude -p` invocation is a clean subprocess -- no PTY, no zombie processes
 - PM2 is used for background process management and log persistence
+
+## Cost Guidance
+
+Claude Orchestrator calls `claude -p` for each task, review, and fix attempt. Costs depend on the mode and project complexity:
+
+| Mode | Typical Claude Calls | Estimated Cost Range |
+|------|---------------------|---------------------|
+| `fix` (simple bug) | 3-8 | $0.10 - $0.50 |
+| `feature` (medium) | 10-25 | $0.50 - $2.00 |
+| `audit` | 5-15 | $0.30 - $1.50 |
+| `build` (full project) | 50-200+ | $5.00 - $30.00+ |
+
+Use `--dry-run` to preview the plan and estimate calls before executing. The dashboard shows real-time cost tracking during execution.
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for the security model, permission modes, and responsible disclosure policy.
 
 ## Contributing
 

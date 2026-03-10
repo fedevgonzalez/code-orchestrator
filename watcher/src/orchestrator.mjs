@@ -210,15 +210,22 @@ export class Orchestrator {
 
   // ── Send prompt to Claude (headless -p mode) ────────────────────────
 
-  async _runPrompt(prompt, timeoutMs) {
+  async _runPrompt(prompt, timeoutMs, { isolatedSession = false } = {}) {
     return this._rateLimiter.wrap(async () => {
       const timeout = timeoutMs || this.config.turnTimeout;
 
-      // Generate session ID on first call
-      if (!this.sessionId) {
+      // For parallel tasks, use a fresh isolated session to avoid race conditions
+      let sessionId = this.sessionId;
+      let firstCall = this._firstCall;
+      if (isolatedSession) {
+        sessionId = randomUUID();
+        firstCall = true;
+      } else if (!sessionId) {
         this.sessionId = randomUUID();
+        sessionId = this.sessionId;
         this._firstCall = true;
-        console.log(`[ORCH] New Claude session: ${this.sessionId}`);
+        firstCall = true;
+        console.log(`[ORCH] New Claude session: ${sessionId}`);
       }
 
       const start = Date.now();
@@ -226,23 +233,25 @@ export class Orchestrator {
       if (rlStatus.queued > 0) {
         console.log(`[ORCH] Rate limiter: ${rlStatus.active} active, ${rlStatus.queued} queued`);
       }
-      console.log(`[ORCH] Sending prompt (${prompt.length} chars, session: ${this.sessionId.slice(0, 8)}...)`);
+      console.log(`[ORCH] Sending prompt (${prompt.length} chars, session: ${sessionId.slice(0, 8)}...${isolatedSession ? " [isolated]" : ""})`);
 
       const result = await runClaudePrompt(prompt, this.cwd, {
-        sessionId: this.sessionId,
-        firstCall: this._firstCall,
+        sessionId,
+        firstCall,
         timeoutMs: timeout,
         onStderr: this.verbose ? (data) => process.stderr.write(`[CLAUDE] ${data}`) : null,
         allowUnsafe: this.config.allowUnsafePermissions !== false,
       });
 
-      this._firstCall = false;
+      if (!isolatedSession) {
+        this._firstCall = false;
+      }
       const elapsed = Math.floor((Date.now() - start) / 1000);
       this.totalCostUsd += result.costUsd || 0;
       console.log(`[ORCH] Response received (${elapsed}s, cost: $${result.costUsd.toFixed(4)}, total: $${this.totalCostUsd.toFixed(4)})`);
 
-      // Update session ID if Claude returned a different one
-      if (result.sessionId && result.sessionId !== this.sessionId) {
+      // Update session ID if Claude returned a different one (only for shared session)
+      if (!isolatedSession && result.sessionId && result.sessionId !== this.sessionId) {
         console.log(`[ORCH] Session ID updated: ${result.sessionId}`);
         this.sessionId = result.sessionId;
       }
@@ -257,7 +266,7 @@ export class Orchestrator {
 
   // ── Task execution ────────────────────────────────────────────────
 
-  async _executeTask(task, phase) {
+  async _executeTask(task, phase, { parallel = false } = {}) {
     const taskLabel = `${phase.id}/${task.id}`;
     console.log(`\n${"═".repeat(60)}`);
     console.log(`[TASK] ${taskLabel}: ${task.prompt.slice(0, 100)}...`);
@@ -270,9 +279,10 @@ export class Orchestrator {
     const toolId = this._writeToolStart("execute_task", `${taskLabel}: ${task.prompt.slice(0, 80)}`);
 
     // Run the task prompt via claude -p
+    const promptOpts = parallel ? { isolatedSession: true } : {};
     let taskFailed = false;
     try {
-      await this._runPrompt(task.prompt);
+      await this._runPrompt(task.prompt, undefined, promptOpts);
     } catch (e) {
       console.error(`[TASK] ${taskLabel}: Claude call failed: ${e.message}`);
       taskFailed = true;
@@ -290,7 +300,7 @@ export class Orchestrator {
         this._emit("task_validation_failed", { taskId: task.id, message: valResult.message });
 
         const fixPrompt = `The validation check failed: ${valResult.message}\n\nPlease fix the issue so that the validation passes: ${task.validate}`;
-        await this._runPrompt(fixPrompt);
+        await this._runPrompt(fixPrompt, undefined, promptOpts);
 
         // Re-validate once
         const retry = runValidation(task, this.cwd);
@@ -314,7 +324,7 @@ export class Orchestrator {
         `Respond with ONLY a JSON object on a single line: {"approved": true/false, "score": 1-10, "issues": ["issue1"]}. ` +
         `Score 7+ means approved.`;
 
-      const reviewResult = await this._runPrompt(reviewPrompt);
+      const reviewResult = await this._runPrompt(reviewPrompt, undefined, promptOpts);
       const reviewText = reviewResult.result || "";
 
       const jsonMatch = reviewText.match(/\{[^{}]*"approved"\s*:\s*(true|false)[^{}]*"score"\s*:\s*(\d+)[^{}]*\}/);
@@ -339,7 +349,9 @@ export class Orchestrator {
             task.status = TaskStatus.FIXING;
             await this._runPrompt(
               `Fix the issues you identified in your review above: ${(review.issues || []).join("; ")}. ` +
-              `Make sure all code is correct and complete.`
+              `Make sure all code is correct and complete.`,
+              undefined,
+              promptOpts
             );
             task.reviewCycles++;
             // Don't fake the score — it stays at the real value
@@ -443,9 +455,12 @@ export class Orchestrator {
 
       if (canParallel) {
         console.log(`[PHASE] Running ${batch.length} tasks in parallel...`);
+        // Save and restore session ID — parallel tasks each get a fresh session
+        // to avoid race conditions on shared sessionId
+        const savedSessionId = this.sessionId;
         const results = await Promise.all(
           batch.map(async (task) => {
-            const ok = await this._executeTask(task, phase);
+            const ok = await this._executeTask(task, phase, { parallel: true });
             if (!ok) {
               task.retries++;
               if (task.retries <= task.maxRetries) {
@@ -459,6 +474,8 @@ export class Orchestrator {
             return { task, ok };
           })
         );
+        // Restore session ID after parallel batch so subsequent sequential tasks continue the session
+        this.sessionId = savedSessionId;
         hasProgress = results.some(r => r.ok || r.retry);
       } else {
         // Sequential execution (default)
@@ -489,7 +506,19 @@ export class Orchestrator {
       if (this.pluginRegistry) {
         await this.pluginRegistry.runHook("beforePhaseValidation", phase, phaseIdx);
       }
-      const phaseValidation = await runPhaseValidation(phase.id, this.cwd, this.config);
+      // Collect extra validators from mode (if any)
+      if (this._modeInstance) {
+        const modeValidators = this._modeInstance.getValidators(phase.id);
+        if (modeValidators?.length > 0 && this.pluginRegistry) {
+          // Register mode validators as phase-level extras so runPhaseValidation picks them up
+          for (const v of modeValidators) {
+            if (!this.pluginRegistry.getPhaseValidators(phase.id).includes(v)) {
+              this.pluginRegistry.addPhaseValidators(phase.id, [v]);
+            }
+          }
+        }
+      }
+      const phaseValidation = await runPhaseValidation(phase.id, this.cwd, this.config, this.pluginRegistry);
 
       if (!phaseValidation.ok) {
         const failures = phaseValidation.results.filter((r) => !r.ok);
@@ -529,7 +558,7 @@ export class Orchestrator {
         // Re-validate
         const maxRetries = this.config.maxValidationRetries || 1;
         for (let attempt = 0; attempt < maxRetries; attempt++) {
-          const retry = await runPhaseValidation(phase.id, this.cwd, this.config);
+          const retry = await runPhaseValidation(phase.id, this.cwd, this.config, this.pluginRegistry);
           if (retry.ok) {
             console.log(`[VALIDATE] Phase "${phase.id}" passed on retry ${attempt + 1}`);
             break;
@@ -587,6 +616,12 @@ export class Orchestrator {
     }
 
     for (const cmd of gate.commandChecks || []) {
+      // Reject commands with dangerous shell metacharacters
+      if (/[;&|`$()]/.test(cmd) && !cmd.startsWith("npm ") && !cmd.startsWith("npx ")) {
+        console.log(`[GATE] Command rejected (shell metacharacters): ${cmd.slice(0, 80)}`);
+        ok = false;
+        continue;
+      }
       try {
         execSync(cmd, { cwd: this.cwd, stdio: "pipe", timeout: 120_000 });
         console.log(`[GATE] Command passed: ${cmd}`);

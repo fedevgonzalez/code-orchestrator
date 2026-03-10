@@ -130,8 +130,13 @@ function checkAuth(req) {
 }
 
 const httpServer = createServer((req, res) => {
+  // Restrict CORS to localhost origins by default
+  const origin = req.headers.origin || "";
+  const allowedOrigin = origin.startsWith("http://localhost") || origin.startsWith("http://127.0.0.1")
+    ? origin
+    : `http://localhost:${PORT}`;
   const headers = {
-    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Origin": allowedOrigin,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
   };
