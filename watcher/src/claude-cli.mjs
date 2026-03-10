@@ -135,9 +135,9 @@ export function runClaudePrompt(prompt, cwd, opts = {}) {
 
       try {
         const json = JSON.parse(stdout);
-        let costUsd = json.cost_usd ?? json.total_cost ?? json.cost ?? 0;
+        let costUsd = json.total_cost_usd ?? json.cost_usd ?? json.total_cost ?? json.cost ?? 0;
         if (!costUsd && json.usage) {
-          costUsd = json.usage.cost_usd ?? json.usage.total_cost ?? json.usage.cost ?? 0;
+          costUsd = json.usage.total_cost_usd ?? json.usage.cost_usd ?? json.usage.total_cost ?? json.usage.cost ?? 0;
         }
         if (costUsd === 0 && opts.verbose) {
           console.log(`[CLAUDE-CLI] Cost is 0. Available keys: ${Object.keys(json).join(", ")}`);
