@@ -375,7 +375,8 @@ export class Orchestrator {
     this.currentTaskIdx = 0;
 
     // ── Phase-level validation ──────────────────────────────────────
-    if (this.config.validationEnabled !== false) {
+    const skipValidation = this._modeInstance?.skipPhaseValidation;
+    if (this.config.validationEnabled !== false && !skipValidation) {
       const phaseValidation = await runPhaseValidation(phase.id, this.cwd, this.config);
 
       if (!phaseValidation.ok) {

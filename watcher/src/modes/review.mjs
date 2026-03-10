@@ -23,7 +23,7 @@ export class ReviewMode extends BaseMode {
       tasks: p.tasks.map(t => ({
         id: t.id,
         prompt: t.prompt,
-        validate: t.validate || null,
+        validate: null, // Review mode: no task validation (read-only analysis)
         phaseId: p.id,
       })),
       gate: { fileChecks: [], commandChecks: [] },
@@ -52,5 +52,9 @@ export class ReviewMode extends BaseMode {
 
   get runFinalReview() {
     return false;
+  }
+
+  get skipPhaseValidation() {
+    return true; // Review is read-only, no build validation needed
   }
 }

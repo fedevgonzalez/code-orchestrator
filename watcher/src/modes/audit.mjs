@@ -57,4 +57,8 @@ export class AuditMode extends BaseMode {
   get runFinalReview() {
     return false; // Audit IS the review
   }
+
+  get skipPhaseValidation() {
+    return !this.autoFix; // Only validate when --fix is set (audit modifies code)
+  }
 }

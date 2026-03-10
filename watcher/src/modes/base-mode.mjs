@@ -63,4 +63,12 @@ export class BaseMode {
   get runTaskReview() {
     return true;
   }
+
+  /**
+   * Whether this mode should skip phase-level validation (build, test, etc.).
+   * Read-only modes (review, audit without --fix) should skip these.
+   */
+  get skipPhaseValidation() {
+    return false;
+  }
 }
