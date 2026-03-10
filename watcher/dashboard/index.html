@@ -5,279 +5,974 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Code Orchestrator — Dashboard</title>
   <style>
+    /* ── Design Tokens ─────────────────────────────────────────── */
     :root {
-      --bg-primary: #0d1117;
-      --bg-secondary: #161b22;
-      --bg-tertiary: #1c2128;
-      --bg-active: #1f2937;
-      --border: #30363d;
-      --border-focus: #58a6ff;
-      --text-primary: #e6edf3;
-      --text-secondary: #8b949e;
-      --text-muted: #6e7681;
-      --blue: #58a6ff;
-      --green: #3fb950;
-      --yellow: #d29922;
-      --orange: #db6d28;
-      --red: #f85149;
-      --purple: #d2a8ff;
-      --cyan: #79c0ff;
+      /* Background layers — 4-level depth system */
+      --bg-0: oklch(0.11 0.015 250);   /* page canvas */
+      --bg-1: oklch(0.14 0.013 250);   /* sidebar / header */
+      --bg-2: oklch(0.17 0.012 250);   /* cards */
+      --bg-3: oklch(0.20 0.011 250);   /* elevated / hover */
+      --bg-4: oklch(0.24 0.010 250);   /* inputs / selected */
+
+      /* Borders */
+      --border:        oklch(0.26 0.012 250);
+      --border-subtle: oklch(0.22 0.010 250);
+      --border-focus:  oklch(0.62 0.18 235);
+
+      /* Text hierarchy */
+      --text-1: oklch(0.93 0.010 250);   /* headings */
+      --text-2: oklch(0.72 0.012 250);   /* body */
+      --text-3: oklch(0.52 0.010 250);   /* muted / captions */
+      --text-4: oklch(0.40 0.008 250);   /* placeholders */
+
+      /* Semantic accent colors — OKLCH perceptually uniform */
+      --blue:   oklch(0.68 0.16 235);
+      --blue-d: oklch(0.52 0.18 235);
+      --green:  oklch(0.70 0.16 145);
+      --green-d:oklch(0.54 0.16 145);
+      --yellow: oklch(0.75 0.16 80);
+      --orange: oklch(0.70 0.18 50);
+      --red:    oklch(0.64 0.20 25);
+      --purple: oklch(0.72 0.14 300);
+      --cyan:   oklch(0.76 0.12 210);
+
+      /* Tinted shadows (hue-matched to background) */
+      --shadow-sm: 0 1px 3px oklch(0.06 0.015 250 / 0.6),
+                   0 1px 2px oklch(0.06 0.015 250 / 0.4);
+      --shadow-md: 0 4px 12px oklch(0.06 0.015 250 / 0.5),
+                   0 2px 4px  oklch(0.06 0.015 250 / 0.4);
+
+      /* Typography */
+      --font-sans: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+
+      /* Spacing scale (8pt grid) */
+      --s1: 4px;
+      --s2: 8px;
+      --s3: 12px;
+      --s4: 16px;
+      --s5: 24px;
+      --s6: 32px;
+
+      /* Radius */
+      --r1: 4px;
+      --r2: 6px;
+      --r3: 8px;
+      --r4: 12px;
     }
 
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    /* ── Reset ──────────────────────────────────────────────────── */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-      background: var(--bg-primary);
-      color: var(--text-primary);
+      font-family: var(--font-sans);
+      background: var(--bg-0);
+      color: var(--text-2);
+      line-height: 1.5;
+      font-size: 14px;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* ── Layout ─────────────────────────────────────────────────── */
+    .app {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      grid-template-rows: 52px 1fr;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────── */
+    .header {
+      grid-column: 1 / -1;
+      background: var(--bg-1);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 var(--s5);
+      gap: var(--s4);
+    }
+
+    .header-brand {
+      display: flex;
+      align-items: center;
+      gap: var(--s3);
+      flex-shrink: 0;
+    }
+
+    .header-logo {
+      width: 24px;
+      height: 24px;
+      border-radius: var(--r2);
+      background: var(--blue-d);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      border: 1px solid oklch(0.68 0.16 235 / 0.30);
+    }
+
+    .header-logo svg {
+      width: 14px;
+      height: 14px;
+      fill: none;
+      stroke: oklch(0.85 0.08 235);
+      stroke-width: 1.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .header h1 {
+      font-size: 0.9rem;
+      color: var(--text-1);
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      white-space: nowrap;
+    }
+
+    .header-divider {
+      width: 1px;
+      height: 16px;
+      background: var(--border);
+      flex-shrink: 0;
+    }
+
+    .mode-badge {
+      padding: 2px 8px;
+      border-radius: var(--r1);
+      font-size: 0.69rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      background: oklch(0.62 0.18 235 / 0.12);
+      color: var(--blue);
+      border: 1px solid oklch(0.62 0.18 235 / 0.25);
+      font-family: var(--font-mono);
+    }
+
+    .status-pill {
+      padding: 3px 10px 3px 8px;
+      border-radius: 20px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      letter-spacing: 0.01em;
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .status-pill.running {
+      background: oklch(0.70 0.16 145 / 0.1);
+      color: var(--green);
+      border: 1px solid oklch(0.70 0.16 145 / 0.25);
+    }
+    .status-pill.running .status-dot {
+      background: var(--green);
+      animation: pulse-dot 2s infinite;
+    }
+
+    .status-pill.completed {
+      background: oklch(0.70 0.16 145 / 0.10);
+      color: var(--green);
+      border: 1px solid oklch(0.70 0.16 145 / 0.25);
+    }
+    .status-pill.completed .status-dot { background: var(--green); }
+
+    .status-pill.stopped,
+    .status-pill.crashed,
+    .status-pill.failed {
+      background: oklch(0.64 0.20 25 / 0.10);
+      color: var(--red);
+      border: 1px solid oklch(0.64 0.20 25 / 0.25);
+    }
+    .status-pill.stopped .status-dot,
+    .status-pill.crashed .status-dot,
+    .status-pill.failed .status-dot { background: var(--red); }
+
+    .status-pill.restarting {
+      background: oklch(0.75 0.16 80 / 0.10);
+      color: var(--yellow);
+      border: 1px solid oklch(0.75 0.16 80 / 0.25);
+    }
+    .status-pill.restarting .status-dot {
+      background: var(--yellow);
+      animation: pulse-dot 1s infinite;
+    }
+
+    .header-spacer { flex: 1; }
+
+    .project-path {
+      color: var(--text-4);
+      font-size: 0.72rem;
+      font-family: var(--font-mono);
+      max-width: 340px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .ws-indicator {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.72rem;
+      color: var(--text-3);
+      padding: 3px 8px;
+      border-radius: 20px;
+      background: var(--bg-0);
+      border: 1px solid var(--border-subtle);
+    }
+
+    .ws-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      transition: background 0.3s ease;
+    }
+
+    .ws-dot.on  { background: var(--green); }
+    .ws-dot.off { background: var(--text-4); }
+
+    /* ── Animations ──────────────────────────────────────────────── */
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .status-dot,
+      .task-status-dot,
+      .progress-fill { animation: none !important; transition: none !important; }
+    }
+
+    /* ── Sidebar ─────────────────────────────────────────────────── */
+    .sidebar {
+      background: var(--bg-1);
+      border-right: 1px solid var(--border);
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+    }
+
+    .sidebar::-webkit-scrollbar { width: 4px; }
+    .sidebar::-webkit-scrollbar-track { background: transparent; }
+    .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .sidebar-section { padding: var(--s4); }
+    .sidebar-section + .sidebar-section { border-top: 1px solid var(--border-subtle); }
+
+    .sidebar-label {
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.10em;
+      color: var(--text-4);
+      font-weight: 700;
+      padding: 0 var(--s1);
+      margin-bottom: var(--s2);
+    }
+
+    /* Phase items */
+    .phase-item {
+      padding: var(--s2) var(--s3);
+      border-radius: var(--r2);
+      margin-bottom: 2px;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: background 0.12s ease, border-color 0.12s ease;
+    }
+
+    .phase-item:hover { background: var(--bg-3); }
+    .phase-item:focus-visible {
+      outline: 2px solid var(--border-focus);
+      outline-offset: 1px;
+    }
+
+    .phase-item.active {
+      background: oklch(0.62 0.18 235 / 0.08);
+      border-color: oklch(0.62 0.18 235 / 0.30);
+      border-left-color: var(--blue);
+      border-left-width: 2px;
+    }
+
+    .phase-item .phase-header {
+      display: flex;
+      align-items: center;
+      gap: var(--s2);
+    }
+
+    .phase-icon {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.60rem;
+      font-weight: 700;
+      flex-shrink: 0;
+      font-family: var(--font-mono);
+      transition: background 0.15s ease;
+    }
+
+    .phase-icon.pending {
+      background: var(--bg-4);
+      border: 1.5px solid var(--border);
+      color: var(--text-3);
+    }
+    .phase-icon.running {
+      background: oklch(0.62 0.18 235 / 0.20);
+      border: 1.5px solid oklch(0.62 0.18 235 / 0.50);
+      color: var(--blue);
+    }
+    .phase-icon.done {
+      background: oklch(0.70 0.16 145 / 0.20);
+      border: 1.5px solid oklch(0.70 0.16 145 / 0.40);
+      color: var(--green);
+    }
+    .phase-icon.failed {
+      background: oklch(0.64 0.20 25 / 0.20);
+      border: 1.5px solid oklch(0.64 0.20 25 / 0.40);
+      color: var(--red);
+    }
+    .phase-icon.gate_check {
+      background: oklch(0.75 0.16 80 / 0.20);
+      border: 1.5px solid oklch(0.75 0.16 80 / 0.40);
+      color: var(--yellow);
+    }
+
+    .phase-name {
+      font-size: 0.80rem;
+      font-weight: 500;
+      color: var(--text-2);
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .phase-item.active .phase-name { color: var(--text-1); }
+
+    .phase-tasks {
+      font-size: 0.68rem;
+      color: var(--text-3);
+      margin-top: 3px;
+      margin-left: 28px;
+    }
+
+    /* Controls */
+    .controls-row {
+      display: flex;
+      gap: var(--s2);
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 32px;
+      padding: 0 var(--s4);
+      border-radius: var(--r2);
+      border: 1px solid var(--border);
+      background: var(--bg-3);
+      color: var(--text-2);
+      cursor: pointer;
+      font-size: 0.76rem;
+      font-weight: 500;
+      font-family: var(--font-sans);
+      transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+      white-space: nowrap;
+    }
+
+    .btn:hover {
+      background: var(--bg-4);
+      color: var(--text-1);
+      border-color: oklch(0.40 0.010 250);
+    }
+
+    .btn:focus-visible {
+      outline: 2px solid var(--border-focus);
+      outline-offset: 2px;
+    }
+
+    .btn:active { transform: translateY(1px); }
+
+    .btn.danger {
+      border-color: oklch(0.64 0.20 25 / 0.35);
+      color: var(--red);
+      background: oklch(0.64 0.20 25 / 0.06);
+    }
+    .btn.danger:hover {
+      background: oklch(0.64 0.20 25 / 0.14);
+      border-color: oklch(0.64 0.20 25 / 0.55);
+    }
+
+    .btn.primary {
+      border-color: oklch(0.70 0.16 145 / 0.35);
+      color: var(--green);
+      background: oklch(0.70 0.16 145 / 0.06);
+    }
+    .btn.primary:hover {
+      background: oklch(0.70 0.16 145 / 0.14);
+      border-color: oklch(0.70 0.16 145 / 0.55);
+    }
+
+    /* History */
+    .history-empty {
+      padding: var(--s1);
+      font-size: 0.76rem;
+      color: var(--text-4);
+    }
+
+    .history-run {
+      padding: var(--s2) var(--s1);
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      gap: var(--s2);
+      font-size: 0.74rem;
+    }
+
+    .history-run:last-child { border-bottom: none; }
+
+    .history-mode-badge {
+      padding: 1px 6px;
+      border-radius: var(--r1);
+      font-size: 0.66rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      background: var(--bg-4);
+      color: var(--text-3);
+      font-family: var(--font-mono);
+      flex-shrink: 0;
+    }
+
+    .history-status-text { font-weight: 600; flex-shrink: 0; }
+    .history-status-text.completed { color: var(--green); }
+    .history-status-text.failed { color: var(--red); }
+
+    .history-tasks { color: var(--text-3); }
+    .history-spacer { flex: 1; }
+    .history-dur { color: var(--text-4); font-family: var(--font-mono); font-size: 0.68rem; }
+
+    /* ── Main ────────────────────────────────────────────────────── */
+    .main {
+      overflow-y: auto;
+      padding: var(--s5);
+      display: flex;
+      flex-direction: column;
+      gap: var(--s4);
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+    }
+
+    .main::-webkit-scrollbar { width: 6px; }
+    .main::-webkit-scrollbar-track { background: transparent; }
+    .main::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    /* ── Stat Cards ──────────────────────────────────────────────── */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+      gap: var(--s3);
+    }
+
+    .stat-card {
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: var(--r3);
+      padding: var(--s4) var(--s4);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .stat-label {
+      font-size: 0.63rem;
+      text-transform: uppercase;
+      letter-spacing: 0.09em;
+      color: var(--text-4);
+      font-weight: 600;
+      margin-bottom: var(--s2);
+      white-space: nowrap;
+    }
+
+    .stat-value {
+      font-size: 1.65rem;
+      font-weight: 700;
+      line-height: 1.1;
+      letter-spacing: -0.02em;
+      font-variant-numeric: tabular-nums;
+      font-family: var(--font-mono);
+      color: var(--text-1);
+    }
+
+    .stat-value.blue   { color: var(--blue); }
+    .stat-value.green  { color: var(--green); }
+    .stat-value.yellow { color: var(--yellow); }
+    .stat-value.red    { color: var(--red); }
+    .stat-value.purple { color: var(--purple); }
+    .stat-value.muted  { color: var(--text-3); }
+
+    /* ── Progress Bar ────────────────────────────────────────────── */
+    .progress-section {
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: var(--r3);
+      padding: var(--s4) var(--s5);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .progress-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: var(--s3);
+    }
+
+    .progress-title {
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text-2);
+      letter-spacing: -0.005em;
+    }
+
+    .progress-pct {
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: var(--blue);
+      font-variant-numeric: tabular-nums;
+      font-family: var(--font-mono);
+    }
+
+    .progress-track {
+      height: 5px;
+      background: var(--bg-4);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+      background: var(--blue);
+    }
+
+    /* ── Task Section ────────────────────────────────────────────── */
+    .task-section {
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: var(--r3);
+      box-shadow: var(--shadow-sm);
+      overflow: hidden;
+    }
+
+    .section-header {
+      padding: var(--s3) var(--s5);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .section-title {
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text-1);
+      letter-spacing: -0.005em;
+    }
+
+    /* Task items */
+    .task-item {
+      padding: var(--s3) var(--s5);
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: flex-start;
+      gap: var(--s3);
+    }
+
+    .task-item:last-child { border-bottom: none; }
+
+    /* Status indicator column */
+    .task-status-col {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: var(--s1);
+      padding-top: 2px;
+      flex-shrink: 0;
+      width: 52px;
+    }
+
+    .task-status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      transition: background 0.2s ease;
+    }
+
+    .task-status-dot.pending   { background: var(--text-4); }
+    .task-status-dot.running   { background: var(--blue); animation: pulse-dot 1.5s infinite; }
+    .task-status-dot.reviewing { background: var(--purple); animation: pulse-dot 1.5s infinite; }
+    .task-status-dot.fixing    { background: var(--orange); animation: pulse-dot 1.5s infinite; }
+    .task-status-dot.done      { background: var(--green); }
+    .task-status-dot.failed    { background: var(--red); }
+    .task-status-dot.skipped   { background: var(--text-4); opacity: 0.4; }
+
+    /* Status chip */
+    .task-status-chip {
+      font-size: 0.60rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 2px 5px;
+      border-radius: var(--r1);
+      white-space: nowrap;
+      font-family: var(--font-mono);
+      line-height: 1.3;
+    }
+
+    .task-status-chip.pending   { background: var(--bg-4); color: var(--text-3); }
+    .task-status-chip.running   {
+      background: oklch(0.68 0.16 235 / 0.15);
+      color: var(--blue);
+      border: 1px solid oklch(0.68 0.16 235 / 0.30);
+    }
+    .task-status-chip.reviewing {
+      background: oklch(0.72 0.14 300 / 0.15);
+      color: var(--purple);
+      border: 1px solid oklch(0.72 0.14 300 / 0.30);
+    }
+    .task-status-chip.fixing {
+      background: oklch(0.70 0.18 50 / 0.15);
+      color: var(--orange);
+      border: 1px solid oklch(0.70 0.18 50 / 0.30);
+    }
+    .task-status-chip.done {
+      background: oklch(0.70 0.16 145 / 0.15);
+      color: var(--green);
+      border: 1px solid oklch(0.70 0.16 145 / 0.30);
+    }
+    .task-status-chip.failed {
+      background: oklch(0.64 0.20 25 / 0.15);
+      color: var(--red);
+      border: 1px solid oklch(0.64 0.20 25 / 0.30);
+    }
+    .task-status-chip.skipped { background: var(--bg-4); color: var(--text-4); }
+
+    .task-body { flex: 1; min-width: 0; }
+
+    .task-top-row {
+      display: flex;
+      align-items: baseline;
+      gap: var(--s3);
+      margin-bottom: 3px;
+    }
+
+    .task-id {
+      font-size: 0.68rem;
+      color: var(--text-3);
+      font-family: var(--font-mono);
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+
+    .task-prompt {
+      font-size: 0.80rem;
+      color: var(--text-2);
+      line-height: 1.4;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+    }
+
+    /* Score badge */
+    .task-score-badge {
+      flex-shrink: 0;
+      font-size: 0.68rem;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      padding: 1px 6px;
+      border-radius: var(--r1);
       line-height: 1.5;
     }
 
-    /* ── Layout ── */
-    .app { display: grid; grid-template-columns: 320px 1fr; grid-template-rows: 56px 1fr; height: 100vh; }
-    .header { grid-column: 1 / -1; background: var(--bg-secondary); border-bottom: 1px solid var(--border);
-              display: flex; align-items: center; padding: 0 20px; gap: 16px; }
-    .sidebar { background: var(--bg-secondary); border-right: 1px solid var(--border); overflow-y: auto; padding: 12px; }
-    .main { overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
-
-    /* ── Header ── */
-    .header h1 { font-size: 1.1em; color: var(--blue); font-weight: 600; white-space: nowrap; }
-    .header .mode-badge {
-      padding: 3px 10px; border-radius: 12px; font-size: 0.75em; font-weight: 600;
-      text-transform: uppercase; letter-spacing: 0.05em;
-      background: #58a6ff22; color: var(--blue); border: 1px solid #58a6ff44;
+    .task-score-badge.empty { color: var(--text-4); }
+    .task-score-badge.high {
+      background: oklch(0.70 0.16 145 / 0.15);
+      color: var(--green);
+      border: 1px solid oklch(0.70 0.16 145 / 0.35);
     }
-    .header .status-pill {
-      padding: 3px 10px; border-radius: 12px; font-size: 0.75em; font-weight: 600;
-      display: flex; align-items: center; gap: 5px;
+    .task-score-badge.mid {
+      background: oklch(0.75 0.16 80 / 0.12);
+      color: var(--yellow);
+      border: 1px solid oklch(0.75 0.16 80 / 0.30);
     }
-    .status-pill .dot { width: 7px; height: 7px; border-radius: 50%; }
-    .status-pill.running { background: #3fb95022; color: var(--green); border: 1px solid #3fb95044; }
-    .status-pill.running .dot { background: var(--green); animation: pulse 2s infinite; }
-    .status-pill.completed { background: #3fb95022; color: var(--green); border: 1px solid #3fb95044; }
-    .status-pill.completed .dot { background: var(--green); }
-    .status-pill.stopped, .status-pill.crashed, .status-pill.failed {
-      background: #f8514922; color: var(--red); border: 1px solid #f8514944;
+    .task-score-badge.low {
+      background: oklch(0.64 0.20 25 / 0.12);
+      color: var(--red);
+      border: 1px solid oklch(0.64 0.20 25 / 0.30);
     }
-    .status-pill.stopped .dot, .status-pill.crashed .dot, .status-pill.failed .dot { background: var(--red); }
-    .status-pill.restarting { background: #d2992222; color: var(--yellow); border: 1px solid #d2992244; }
-    .status-pill.restarting .dot { background: var(--yellow); animation: pulse 1s infinite; }
-    .header .spacer { flex: 1; }
-    .header .project-path { color: var(--text-muted); font-size: 0.78em; font-family: 'SF Mono', monospace; }
-    .header .ws-indicator { display: flex; align-items: center; gap: 5px; font-size: 0.75em; color: var(--text-muted); }
-    .ws-indicator .dot { width: 6px; height: 6px; border-radius: 50%; }
-    .ws-indicator .dot.on { background: var(--green); }
-    .ws-indicator .dot.off { background: var(--red); }
 
-    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
-
-    /* ── Stat Cards ── */
-    .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
-    .stat-card {
-      background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px;
-      padding: 12px 14px;
+    .task-meta {
+      display: flex;
+      gap: var(--s3);
+      align-items: center;
     }
-    .stat-card .label { font-size: 0.7em; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 4px; }
-    .stat-card .value { font-size: 1.5em; font-weight: 700; }
-    .stat-card .value.green { color: var(--green); }
-    .stat-card .value.yellow { color: var(--yellow); }
-    .stat-card .value.red { color: var(--red); }
-    .stat-card .value.blue { color: var(--blue); }
-    .stat-card .value.purple { color: var(--purple); }
 
-    /* ── Progress Bar ── */
-    .progress-section { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
-    .progress-header { display: flex; justify-content: space-between; margin-bottom: 8px; }
-    .progress-header .title { font-size: 0.85em; font-weight: 600; }
-    .progress-header .pct { font-size: 0.85em; color: var(--blue); font-weight: 600; }
-    .progress-bar { height: 8px; background: var(--bg-primary); border-radius: 4px; overflow: hidden; }
-    .progress-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; background: linear-gradient(90deg, var(--blue), var(--green)); }
-
-    /* ── Sidebar Phases ── */
-    .sidebar-title { font-size: 0.7em; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); padding: 8px 4px 6px; }
-    .phase-item {
-      padding: 10px 12px; border-radius: 6px; margin-bottom: 4px; cursor: default;
-      border: 1px solid transparent; transition: background 0.15s;
+    .task-meta-item {
+      font-size: 0.68rem;
+      color: var(--text-4);
     }
-    .phase-item:hover { background: var(--bg-tertiary); }
-    .phase-item.active { border-color: var(--border-focus); background: var(--bg-active); }
-    .phase-item .phase-header { display: flex; align-items: center; gap: 8px; }
-    .phase-item .phase-icon { width: 18px; height: 18px; border-radius: 50%; display: flex;
-      align-items: center; justify-content: center; font-size: 0.65em; flex-shrink: 0; }
-    .phase-icon.pending { background: var(--bg-primary); border: 2px solid var(--border); color: var(--text-muted); }
-    .phase-icon.running { background: var(--blue); color: white; }
-    .phase-icon.done { background: var(--green); color: white; }
-    .phase-icon.failed { background: var(--red); color: white; }
-    .phase-icon.gate_check { background: var(--yellow); color: white; }
-    .phase-item .phase-name { font-size: 0.82em; font-weight: 500; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .phase-item .phase-tasks { font-size: 0.7em; color: var(--text-muted); margin-top: 4px; margin-left: 26px; }
 
-    /* ── Task List ── */
-    .task-section { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; }
-    .task-section-header { padding: 12px 14px; border-bottom: 1px solid var(--border); font-size: 0.85em; font-weight: 600; }
-    .task-item {
-      padding: 10px 14px; border-bottom: 1px solid var(--border);
-      display: flex; align-items: flex-start; gap: 10px;
+    .task-meta-item strong {
+      font-weight: 600;
+      color: var(--text-3);
     }
-    .task-item:last-child { border-bottom: none; }
-    .task-status-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
-    .task-status-dot.pending { background: var(--text-muted); }
-    .task-status-dot.running { background: var(--blue); animation: pulse 1.5s infinite; }
-    .task-status-dot.reviewing { background: var(--purple); animation: pulse 1.5s infinite; }
-    .task-status-dot.fixing { background: var(--orange); animation: pulse 1.5s infinite; }
-    .task-status-dot.done { background: var(--green); }
-    .task-status-dot.failed { background: var(--red); }
-    .task-status-dot.skipped { background: var(--text-muted); opacity: 0.5; }
-    .task-body { flex: 1; min-width: 0; }
-    .task-id { font-size: 0.72em; color: var(--text-muted); font-family: 'SF Mono', monospace; }
-    .task-prompt { font-size: 0.82em; color: var(--text-primary); margin-top: 2px;
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .task-meta { display: flex; gap: 12px; margin-top: 4px; }
-    .task-meta span { font-size: 0.7em; color: var(--text-muted); }
-    .task-score { font-weight: 600; }
-    .task-score.high { color: var(--green); }
-    .task-score.mid { color: var(--yellow); }
-    .task-score.low { color: var(--red); }
 
-    /* ── Log ── */
-    .log-section { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; flex: 1; min-height: 200px; display: flex; flex-direction: column; }
-    .log-header { padding: 10px 14px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
-    .log-header .title { font-size: 0.85em; font-weight: 600; }
-    .log-header .controls { display: flex; gap: 6px; }
-    .log-body { flex: 1; overflow-y: auto; padding: 8px 12px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.73em; line-height: 1.6; }
-    .log-line { color: var(--text-muted); white-space: pre-wrap; word-break: break-all; }
-    .log-line.state { color: var(--blue); }
-    .log-line.error { color: var(--red); }
-    .log-line.orch { color: var(--purple); }
-    .log-line.success { color: var(--green); }
-
-    /* ── Buttons ── */
-    .btn {
-      padding: 5px 12px; border-radius: 6px; border: 1px solid var(--border);
-      background: var(--bg-tertiary); color: var(--text-secondary);
-      cursor: pointer; font-size: 0.75em; font-family: inherit; transition: all 0.15s;
+    .task-empty {
+      padding: var(--s6) var(--s5);
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: var(--s2);
     }
-    .btn:hover { background: var(--border); color: var(--text-primary); }
-    .btn.danger { border-color: #f8514966; color: var(--red); }
-    .btn.danger:hover { background: #f8514922; }
-    .btn.primary { border-color: #3fb95066; color: var(--green); }
-    .btn.primary:hover { background: #3fb95022; }
 
-    /* ── History ── */
-    .history-section { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; }
-    .history-header { padding: 12px 14px; border-bottom: 1px solid var(--border); font-size: 0.85em; font-weight: 600; }
-    .history-item {
-      padding: 8px 14px; border-bottom: 1px solid var(--border);
-      display: flex; align-items: center; gap: 10px; font-size: 0.78em;
+    .task-empty-icon {
+      color: var(--text-4);
+      margin-bottom: var(--s1);
     }
-    .history-item:last-child { border-bottom: none; }
-    .history-mode { padding: 2px 8px; border-radius: 4px; font-size: 0.8em; font-weight: 600;
-      background: var(--bg-tertiary); color: var(--text-secondary); }
-    .history-status { font-weight: 600; }
-    .history-status.completed { color: var(--green); }
-    .history-status.failed { color: var(--red); }
 
-    /* ── Responsive ── */
-    @media (max-width: 900px) {
+    .task-empty-title {
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--text-3);
+    }
+
+    .task-empty-sub {
+      font-size: 0.74rem;
+      color: var(--text-4);
+      line-height: 1.5;
+    }
+
+    /* ── Log Section ─────────────────────────────────────────────── */
+    .log-section {
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: var(--r3);
+      box-shadow: var(--shadow-sm);
+      display: flex;
+      flex-direction: column;
+      min-height: 180px;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    .log-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: var(--s2) var(--s4) var(--s3);
+      font-family: var(--font-mono);
+      font-size: 0.71rem;
+      line-height: 1.7;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+      /* Ensure a visible minimum even when empty */
+      min-height: 120px;
+    }
+
+    .log-body::-webkit-scrollbar { width: 4px; }
+    .log-body::-webkit-scrollbar-track { background: transparent; }
+    .log-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .log-line {
+      display: flex;
+      gap: var(--s2);
+      white-space: pre-wrap;
+      word-break: break-all;
+      color: var(--text-3);
+    }
+
+    .log-ts {
+      color: var(--text-4);
+      flex-shrink: 0;
+      user-select: none;
+    }
+
+    .log-line.state   .log-msg { color: var(--blue); }
+    .log-line.error   .log-msg { color: var(--red); }
+    .log-line.orch    .log-msg { color: var(--purple); }
+    .log-line.success .log-msg { color: var(--green); }
+
+    /* ── Responsive ──────────────────────────────────────────────── */
+    @media (max-width: 960px) {
       .app { grid-template-columns: 1fr; }
       .sidebar { display: none; }
+    }
+
+    @media (max-width: 600px) {
+      .main { padding: var(--s4); }
+      .task-item { padding-left: var(--s4); padding-right: var(--s4); }
+      .section-header { padding-left: var(--s4); padding-right: var(--s4); }
+      .progress-section { padding-left: var(--s4); padding-right: var(--s4); }
     }
   </style>
 </head>
 <body>
   <div class="app">
+
     <!-- Header -->
-    <div class="header">
-      <h1>Code Orchestrator</h1>
+    <header class="header">
+      <div class="header-brand">
+        <div class="header-logo" aria-hidden="true">
+          <svg viewBox="0 0 14 14">
+            <!-- center node -->
+            <circle cx="7" cy="7" r="1.5" fill="oklch(0.85 0.08 235)" stroke="none"/>
+            <!-- spoke lines -->
+            <line x1="7" y1="5.5" x2="7" y2="2"/>
+            <line x1="7" y1="8.5" x2="7" y2="12"/>
+            <line x1="5.5" y1="7" x2="2" y2="7"/>
+            <line x1="8.5" y1="7" x2="12" y2="7"/>
+            <!-- outer nodes -->
+            <circle cx="7" cy="2" r="1" fill="oklch(0.85 0.08 235)" stroke="none"/>
+            <circle cx="7" cy="12" r="1" fill="oklch(0.85 0.08 235)" stroke="none"/>
+            <circle cx="2" cy="7" r="1" fill="oklch(0.85 0.08 235)" stroke="none"/>
+            <circle cx="12" cy="7" r="1" fill="oklch(0.85 0.08 235)" stroke="none"/>
+          </svg>
+        </div>
+        <h1>Code Orchestrator</h1>
+      </div>
+
+      <div class="header-divider" aria-hidden="true"></div>
+
       <div class="mode-badge" id="modeBadge">—</div>
-      <div class="status-pill stopped" id="statusPill">
-        <div class="dot"></div>
+
+      <div class="status-pill stopped" id="statusPill" role="status" aria-label="Orchestrator status">
+        <div class="status-dot"></div>
         <span id="statusText">Stopped</span>
       </div>
-      <div class="spacer"></div>
-      <div class="project-path" id="projectPath">—</div>
-      <div class="ws-indicator">
-        <div class="dot off" id="wsDot"></div>
+
+      <div class="header-spacer"></div>
+
+      <div class="project-path" id="projectPath" title="">—</div>
+
+      <div class="ws-indicator" role="status" aria-label="WebSocket connection status">
+        <div class="ws-dot off" id="wsDot"></div>
         <span id="wsText">Offline</span>
       </div>
-    </div>
+    </header>
 
-    <!-- Sidebar: Phases -->
-    <div class="sidebar">
-      <div class="sidebar-title">Phases</div>
-      <div id="phaseList"></div>
+    <!-- Sidebar -->
+    <nav class="sidebar" aria-label="Phases and controls">
 
-      <div class="sidebar-title" style="margin-top: 16px">Controls</div>
-      <div style="display: flex; gap: 6px; padding: 4px;">
-        <button class="btn primary" onclick="restartOrch()" style="flex:1">Restart</button>
-        <button class="btn danger" onclick="stopOrch()" style="flex:1">Stop</button>
+      <div class="sidebar-section">
+        <div class="sidebar-label">Phases</div>
+        <div id="phaseList" role="list"></div>
       </div>
 
-      <div class="sidebar-title" style="margin-top: 16px">Run History</div>
-      <div id="historyList" style="font-size: 0.8em; color: var(--text-muted);">No history</div>
-    </div>
+      <div class="sidebar-section">
+        <div class="sidebar-label">Controls</div>
+        <div class="controls-row">
+          <button class="btn primary" onclick="restartOrch()" style="flex:1" aria-label="Restart orchestrator">Restart</button>
+          <button class="btn danger"  onclick="stopOrch()"    style="flex:1" aria-label="Stop orchestrator">Stop</button>
+        </div>
+      </div>
+
+      <div class="sidebar-section" style="flex:1">
+        <div class="sidebar-label">Run History</div>
+        <div id="historyList">
+          <div class="history-empty">No previous runs</div>
+        </div>
+      </div>
+
+    </nav>
 
     <!-- Main content -->
-    <div class="main">
-      <!-- Stats row -->
-      <div class="stats-row">
+    <main class="main">
+
+      <!-- Stat cards -->
+      <div class="stats-row" role="region" aria-label="Run statistics">
         <div class="stat-card">
-          <div class="label">Tasks</div>
-          <div class="value blue" id="taskProgress">0/0</div>
+          <div class="stat-label">Tasks</div>
+          <div class="stat-value blue" id="taskProgress">0/0</div>
         </div>
         <div class="stat-card">
-          <div class="label">Phases</div>
-          <div class="value blue" id="phaseProgress">0/0</div>
+          <div class="stat-label">Phases</div>
+          <div class="stat-value blue" id="phaseProgress">0/0</div>
         </div>
         <div class="stat-card">
-          <div class="label">Avg Score</div>
-          <div class="value green" id="avgScore">--</div>
+          <div class="stat-label">Avg Score</div>
+          <div class="stat-value green" id="avgScore">—</div>
         </div>
         <div class="stat-card">
-          <div class="label">Cost</div>
-          <div class="value purple" id="totalCost">$0.00</div>
+          <div class="stat-label">Cost</div>
+          <div class="stat-value purple" id="totalCost">$0.00</div>
         </div>
         <div class="stat-card">
-          <div class="label">Uptime</div>
-          <div class="value" id="uptime" style="color: var(--text-secondary)">--</div>
+          <div class="stat-label">Uptime</div>
+          <div class="stat-value muted" id="uptime">—</div>
         </div>
         <div class="stat-card">
-          <div class="label">Restarts</div>
-          <div class="value" id="restarts" style="color: var(--text-secondary)">0</div>
+          <div class="stat-label">Restarts</div>
+          <div class="stat-value muted" id="restarts">0</div>
         </div>
       </div>
 
       <!-- Progress bar -->
-      <div class="progress-section">
+      <div class="progress-section" role="region" aria-label="Overall progress">
         <div class="progress-header">
-          <span class="title">Overall Progress</span>
-          <span class="pct" id="progressPct">0%</span>
+          <span class="progress-title">Overall Progress</span>
+          <span class="progress-pct" id="progressPct" aria-live="polite">0%</span>
         </div>
-        <div class="progress-bar">
+        <div class="progress-track" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" id="progressBar">
           <div class="progress-fill" id="progressFill" style="width: 0%"></div>
         </div>
       </div>
 
       <!-- Current phase tasks -->
-      <div class="task-section" id="taskSection">
-        <div class="task-section-header" id="taskSectionHeader">Tasks</div>
+      <div class="task-section" id="taskSection" role="region">
+        <div class="section-header">
+          <span class="section-title" id="taskSectionHeader">Tasks</span>
+        </div>
         <div id="taskList">
-          <div class="task-item">
-            <div style="color: var(--text-muted); font-size: 0.82em; padding: 8px;">Waiting for orchestrator...</div>
+          <div class="task-empty">
+            <div class="task-empty-icon" aria-hidden="true">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="9"/>
+                <path d="M12 7v5l3 3"/>
+              </svg>
+            </div>
+            <div class="task-empty-title">Waiting for orchestrator</div>
+            <div class="task-empty-sub">Tasks will appear here once a run is active</div>
           </div>
         </div>
       </div>
 
-      <!-- Log -->
-      <div class="log-section">
-        <div class="log-header">
-          <span class="title">Live Log</span>
-          <div class="controls">
-            <button class="btn" onclick="clearLog()">Clear</button>
+      <!-- Live log -->
+      <div class="log-section" role="region" aria-label="Live log">
+        <div class="section-header">
+          <span class="section-title">Live Log</span>
+          <div>
+            <button class="btn" onclick="clearLog()" aria-label="Clear log">Clear</button>
           </div>
         </div>
-        <div class="log-body" id="log"></div>
+        <div class="log-body" id="log" aria-live="polite" aria-label="Log output"></div>
       </div>
-    </div>
+
+    </main>
   </div>
 
   <script>
@@ -300,13 +995,13 @@
       ws = new WebSocket(WS_URL);
 
       ws.onopen = () => {
-        document.getElementById('wsDot').className = 'dot on';
+        document.getElementById('wsDot').className = 'ws-dot on';
         document.getElementById('wsText').textContent = 'Live';
         addLog('Connected to supervisor', 'success');
       };
 
       ws.onclose = () => {
-        document.getElementById('wsDot').className = 'dot off';
+        document.getElementById('wsDot').className = 'ws-dot off';
         document.getElementById('wsText').textContent = 'Reconnecting...';
         setTimeout(connect, 3000);
       };
@@ -320,7 +1015,11 @@
     function handleEvent(d) {
       switch (d.type) {
         case 'initial_state':
-          if (d.project_cwd) document.getElementById('projectPath').textContent = d.project_cwd;
+          if (d.project_cwd) {
+            const el = document.getElementById('projectPath');
+            el.textContent = d.project_cwd;
+            el.title = d.project_cwd;
+          }
           if (d.orchestrator) {
             setStatus(d.orchestrator.status, d.orchestrator.restarts);
             if (d.mode) setMode(d.mode);
@@ -352,7 +1051,6 @@
         case 'phase_start':
           updatePhaseStatus(d.phaseId, 'running');
           addLog(`Phase started: ${d.name || d.phaseId}`, 'state');
-          // Auto-select running phase
           const runIdx = phases.findIndex(p => p.id === d.phaseId);
           if (runIdx >= 0) selectPhase(runIdx);
           break;
@@ -425,7 +1123,7 @@
           break;
 
         case 'state_change':
-          addLog(`Agent → ${d.state}`, 'state');
+          addLog(`Agent -> ${d.state}`, 'state');
           break;
 
         case 'turn_complete':
@@ -442,17 +1140,23 @@
       phases.forEach((phase, idx) => {
         const el = document.createElement('div');
         el.className = `phase-item${idx === selectedPhaseIdx ? ' active' : ''}`;
+        el.setAttribute('role', 'listitem');
+        el.setAttribute('tabindex', '0');
         el.onclick = () => selectPhase(idx);
+        el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectPhase(idx); } };
 
-        const doneTasks = phase.tasks.filter(t => t.status === 'done').length;
+        const doneTasks  = phase.tasks.filter(t => t.status === 'done').length;
         const totalTasks = phase.tasks.length;
-        const iconClass = phase.status || 'pending';
-        const iconText = iconClass === 'done' ? '✓' : iconClass === 'running' ? '▶' : iconClass === 'failed' ? '✕' : (idx + 1);
+        const iconClass  = phase.status || 'pending';
+        const iconText   = iconClass === 'done'    ? '&#10003;'
+                         : iconClass === 'running' ? '&#9654;'
+                         : iconClass === 'failed'  ? '&#10005;'
+                         : (idx + 1);
 
         el.innerHTML = `
           <div class="phase-header">
-            <div class="phase-icon ${iconClass}">${iconText}</div>
-            <div class="phase-name" title="${phase.name}">${phase.name || phase.id}</div>
+            <div class="phase-icon ${iconClass}" aria-hidden="true">${iconText}</div>
+            <div class="phase-name" title="${esc(phase.name || phase.id)}">${esc(phase.name || phase.id)}</div>
           </div>
           <div class="phase-tasks">${doneTasks}/${totalTasks} tasks</div>
         `;
@@ -476,7 +1180,10 @@
       container.innerHTML = '';
 
       if (phase.tasks.length === 0) {
-        container.innerHTML = '<div class="task-item"><div style="color:var(--text-muted);font-size:0.82em;padding:8px;">No tasks</div></div>';
+        container.innerHTML = `
+          <div class="task-empty">
+            <div class="task-empty-title">No tasks in this phase</div>
+          </div>`;
         return;
       }
 
@@ -484,23 +1191,28 @@
         const el = document.createElement('div');
         el.className = 'task-item';
 
-        let scoreClass = '';
-        if (task.reviewScore >= 8) scoreClass = 'high';
+        let scoreClass = 'empty';
+        if (task.reviewScore >= 8)      scoreClass = 'high';
         else if (task.reviewScore >= 6) scoreClass = 'mid';
-        else if (task.reviewScore > 0) scoreClass = 'low';
+        else if (task.reviewScore > 0)  scoreClass = 'low';
 
         const scoreText = task.reviewScore > 0 ? task.reviewScore : '—';
+        const retriesHtml = task.retries > 0
+          ? `<span class="task-meta-item">Retries: <strong>${task.retries}</strong></span>`
+          : '';
 
         el.innerHTML = `
-          <div class="task-status-dot ${task.status}"></div>
+          <div class="task-status-col" aria-hidden="true">
+            <div class="task-status-dot ${task.status}"></div>
+            <div class="task-status-chip ${task.status}">${esc(task.status)}</div>
+          </div>
           <div class="task-body">
-            <div class="task-id">${task.id}</div>
-            <div class="task-prompt" title="${esc(task.prompt)}">${esc(task.prompt.slice(0, 200))}</div>
-            <div class="task-meta">
-              <span>Status: <strong>${task.status}</strong></span>
-              <span>Score: <span class="task-score ${scoreClass}">${scoreText}</span></span>
-              ${task.retries > 0 ? `<span>Retries: ${task.retries}</span>` : ''}
+            <div class="task-top-row">
+              <span class="task-id">${esc(task.id)}</span>
+              <span class="task-prompt" title="${esc(task.prompt)}">${esc(task.prompt.slice(0, 200))}</span>
+              <span class="task-score-badge ${scoreClass}">${scoreText}</span>
             </div>
+            ${retriesHtml ? `<div class="task-meta">${retriesHtml}</div>` : ''}
           </div>
         `;
         container.appendChild(el);
@@ -530,14 +1242,18 @@
 
     function updateStats() {
       const totalTasks = phases.reduce((s, p) => s + p.tasks.length, 0);
-      const doneTasks = phases.reduce((s, p) => s + p.tasks.filter(t => t.status === 'done').length, 0);
+      const doneTasks  = phases.reduce((s, p) => s + p.tasks.filter(t => t.status === 'done').length, 0);
       const donePhases = phases.filter(p => p.status === 'done').length;
-      const pct = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
+      const pct        = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
 
-      document.getElementById('taskProgress').textContent = `${doneTasks}/${totalTasks}`;
+      document.getElementById('taskProgress').textContent  = `${doneTasks}/${totalTasks}`;
       document.getElementById('phaseProgress').textContent = `${donePhases}/${phases.length}`;
-      document.getElementById('progressPct').textContent = `${pct}%`;
-      document.getElementById('progressFill').style.width = `${pct}%`;
+      document.getElementById('progressPct').textContent   = `${pct}%`;
+
+      const fill = document.getElementById('progressFill');
+      fill.style.width = `${pct}%`;
+      const bar = document.getElementById('progressBar');
+      bar.setAttribute('aria-valuenow', pct);
 
       // Average score
       let totalScore = 0, scoredCount = 0;
@@ -546,11 +1262,11 @@
           if (t.reviewScore > 0) { totalScore += t.reviewScore; scoredCount++; }
         }
       }
-      const avg = scoredCount > 0 ? (totalScore / scoredCount).toFixed(1) : '—';
+      const avg   = scoredCount > 0 ? (totalScore / scoredCount).toFixed(1) : '—';
       const avgEl = document.getElementById('avgScore');
       avgEl.textContent = avg;
       if (avg !== '—') {
-        avgEl.className = 'value ' + (avg >= 8 ? 'green' : avg >= 6 ? 'yellow' : 'red');
+        avgEl.className = 'stat-value ' + (avg >= 8 ? 'green' : avg >= 6 ? 'yellow' : 'red');
       }
     }
 
@@ -563,8 +1279,7 @@
       if (restarts !== null && restarts !== undefined) {
         const el = document.getElementById('restarts');
         el.textContent = restarts;
-        el.className = 'value ' + (restarts > 0 ? 'yellow' : '');
-        el.style.color = restarts > 0 ? '' : 'var(--text-secondary)';
+        el.className = 'stat-value ' + (restarts > 0 ? 'yellow' : 'muted');
       }
     }
 
@@ -575,11 +1290,22 @@
 
     // ── Log ──────────────────────────────────────────────
     function addLog(text, cls = '') {
-      const log = document.getElementById('log');
+      const log  = document.getElementById('log');
       const line = document.createElement('div');
       line.className = 'log-line ' + cls;
-      const time = new Date().toLocaleTimeString();
-      line.textContent = `[${time}] ${text}`;
+
+      const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+
+      const ts  = document.createElement('span');
+      ts.className = 'log-ts';
+      ts.textContent = `[${time}]`;
+
+      const msg = document.createElement('span');
+      msg.className = 'log-msg';
+      msg.textContent = text;
+
+      line.appendChild(ts);
+      line.appendChild(msg);
       log.appendChild(line);
       log.scrollTop = log.scrollHeight;
       while (log.children.length > 500) log.removeChild(log.firstChild);
@@ -593,27 +1319,25 @@
     function renderHistory(history) {
       const container = document.getElementById('historyList');
       if (!history || history.length === 0) {
-        container.innerHTML = '<div style="padding: 4px; font-size: 0.82em; color: var(--text-muted);">No previous runs</div>';
+        container.innerHTML = '<div class="history-empty">No previous runs</div>';
         return;
       }
 
       container.innerHTML = '';
-      // Show last 10 runs
       const recent = history.slice(-10).reverse();
       for (const run of recent) {
         const el = document.createElement('div');
-        el.style.cssText = 'padding: 6px 4px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px; font-size: 0.78em;';
+        el.className = 'history-run';
 
-        const dur = run.durationMs ? formatDuration(Math.floor(run.durationMs / 1000)) : '—';
-        const date = run.startedAt ? new Date(run.startedAt).toLocaleDateString() : '';
-        const statusColor = run.status === 'completed' ? 'var(--green)' : 'var(--red)';
+        const dur         = run.durationMs ? formatDuration(Math.floor(run.durationMs / 1000)) : '—';
+        const statusClass = run.status === 'completed' ? 'completed' : 'failed';
 
         el.innerHTML = `
-          <span class="history-mode">${run.mode || '?'}</span>
-          <span style="color: ${statusColor}; font-weight: 600;">${run.status}</span>
-          <span style="color: var(--text-muted)">${run.completedTasks || 0}/${run.totalTasks || 0}</span>
-          <span style="flex:1"></span>
-          <span style="color: var(--text-muted)">${dur}</span>
+          <span class="history-mode-badge">${esc(run.mode || '?')}</span>
+          <span class="history-status-text ${statusClass}">${esc(run.status)}</span>
+          <span class="history-tasks">${run.completedTasks || 0}/${run.totalTasks || 0}</span>
+          <span class="history-spacer"></span>
+          <span class="history-dur">${dur}</span>
         `;
         container.appendChild(el);
       }
@@ -630,13 +1354,12 @@
     async function pollHealth() {
       try {
         const res = await fetch(`${BASE}/health`);
-        const d = await res.json();
+        const d   = await res.json();
         document.getElementById('uptime').textContent = formatDuration(d.uptime_s);
         setStatus(d.orchestrator_status, d.orchestrator_restarts);
       } catch { /* offline */ }
     }
 
-    // Fetch full state periodically to sync phases
     async function pollState() {
       try {
         const res = await authFetch(`${BASE}/state`);
@@ -653,7 +1376,6 @@
         }
         if (d.mode) setMode(d.mode);
         if (d.history) renderHistory(d.history);
-        // Cost tracking
         if (d.cost !== undefined && d.cost > 0) {
           totalCost = d.cost;
           document.getElementById('totalCost').textContent = `$${totalCost.toFixed(2)}`;
@@ -663,8 +1385,8 @@
 
     function formatDuration(s) {
       if (!s || s < 0) return '—';
-      const h = Math.floor(s / 3600);
-      const m = Math.floor((s % 3600) / 60);
+      const h   = Math.floor(s / 3600);
+      const m   = Math.floor((s % 3600) / 60);
       const sec = Math.floor(s % 60);
       if (h > 0) return `${h}h ${m}m`;
       if (m > 0) return `${m}m ${sec}s`;
@@ -672,7 +1394,12 @@
     }
 
     function esc(str) {
-      return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
     }
 
     // ── Controls ─────────────────────────────────────────

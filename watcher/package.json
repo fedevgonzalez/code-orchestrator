@@ -1,6 +1,6 @@
 {
   "name": "code-orchestrator",
-  "version": "2.2.2",
+  "version": "2.3.0",
   "description": "Autonomous multi-mode developer tool for AI-powered coding agents. Build, fix, audit, test, review, refactor — all with automatic code review and crash recovery.",
   "main": "watcher.mjs",
   "type": "module",
