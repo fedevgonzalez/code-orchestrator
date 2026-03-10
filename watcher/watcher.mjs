@@ -21,6 +21,9 @@ import { join, resolve, dirname } from "path";
 import { parseArgs } from "util";
 import { fileURLToPath } from "url";
 import { Orchestrator } from "./src/orchestrator.mjs";
+import { loadConfig } from "./src/config.mjs";
+import { PluginRegistry, loadPlugins } from "./src/plugins.mjs";
+import { loadHistory, saveRunRecord, createRunRecord, getHistoryStats } from "./src/history.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -83,9 +86,15 @@ const state = {
     currentPhase: null,
     currentTask: null,
     lastLog: [],        // last 200 log lines
+    phases: [],         // live phase/task data for dashboard
   },
+  mode: args.mode || "build",
   startedAt: Date.now(),
 };
+
+// Config + plugins (loaded async on start)
+let projectConfig = {};
+const pluginRegistry = new PluginRegistry();
 
 function pushLog(text) {
   state.orchestrator.lastLog.push({ time: new Date().toISOString(), text });
@@ -146,10 +155,15 @@ const httpServer = createServer((req, res) => {
   }
 
   if (req.url === "/state" && req.method === "GET") {
+    const history = loadHistory(PROJECT_CWD);
     res.writeHead(200);
     res.end(JSON.stringify({
       orchestrator: state.orchestrator,
+      mode: state.mode,
       project_cwd: PROJECT_CWD,
+      history: history.slice(-20),
+      historyStats: getHistoryStats(history),
+      plugins: pluginRegistry.loadedPlugins.length,
     }));
     return;
   }
@@ -189,13 +203,17 @@ wss.on("connection", (ws) => {
   clients.add(ws);
   console.log(`[WS] Client connected (${clients.size} total)`);
 
+  const history = loadHistory(PROJECT_CWD);
   ws.send(JSON.stringify({
     type: "initial_state",
     orchestrator: {
       status: state.orchestrator.status,
       restarts: state.orchestrator.restarts,
     },
+    mode: state.mode,
+    phases: state.orchestrator.phases,
     project_cwd: PROJECT_CWD,
+    history: history.slice(-20),
   }));
 
   ws.on("close", () => clients.delete(ws));
@@ -247,6 +265,8 @@ function startOrchestrator(forceResume = false) {
     timestamp: Date.now(),
   });
 
+  state.mode = args.mode || "build";
+
   currentOrchestrator = new Orchestrator({
     cwd: PROJECT_CWD,
     specPath,
@@ -259,10 +279,27 @@ function startOrchestrator(forceResume = false) {
     resume: isResume,
     noReview: args["no-review"],
     verbose: VERBOSE,
-    config: { devServerPort: DEV_PORT },
+    config: { devServerPort: DEV_PORT, ...projectConfig },
+    pluginRegistry,
     onEvent: (event) => {
       pushLog(`[${event.type}] ${JSON.stringify(event).slice(0, 300)}`);
       broadcast(event);
+
+      // Sync phases to dashboard state
+      if (currentOrchestrator?.phases) {
+        state.orchestrator.phases = currentOrchestrator.phases;
+      }
+
+      // Broadcast full state on key events for dashboard sync
+      if (["plan_ready", "phase_start", "phase_done", "task_start", "task_done", "task_reviewed"].includes(event.type)) {
+        broadcast({
+          type: "state_update",
+          phases: currentOrchestrator?.phases || [],
+          status: state.orchestrator.status,
+          mode: state.mode,
+        });
+      }
+
       // Reset restart counter on real progress
       if (event.type === "phase_done") {
         if (state.orchestrator.restarts > 0) {
@@ -270,13 +307,24 @@ function startOrchestrator(forceResume = false) {
           state.orchestrator.restarts = 0;
         }
       }
+
+      // Run plugin hooks
+      pluginRegistry.runHook("onEvent", event);
     },
   });
 
   // Run the orchestrator and handle completion/crash
   currentOrchestrator.run().then(() => {
     const orchStatus = currentOrchestrator.status;
+    const finishedOrch = currentOrchestrator;
     currentOrchestrator = null;
+
+    // Save run to history
+    try {
+      const record = createRunRecord(finishedOrch, state.orchestrator.restarts);
+      record.status = orchStatus;
+      saveRunRecord(PROJECT_CWD, record);
+    } catch (e) { console.error(`[HISTORY] Failed to save: ${e.message}`); }
 
     if (orchStatus === "completed") {
       state.orchestrator.status = "completed";
@@ -359,10 +407,27 @@ console.log(`  Max restarts: ${MAX_RESTARTS}`);
 console.log(`  Review:       ${args["no-review"] ? "DISABLED" : "ENABLED"}`);
 console.log("");
 
-httpServer.listen(PORT, () => {
+httpServer.listen(PORT, async () => {
   console.log(`[READY] Supervisor running on http://localhost:${PORT}`);
   console.log(`        WebSocket: ws://localhost:${PORT}`);
   console.log("");
+
+  // Load project config and plugins
+  try {
+    projectConfig = await loadConfig(PROJECT_CWD, { devServerPort: DEV_PORT });
+    if (projectConfig.plugins) {
+      await loadPlugins(projectConfig.plugins, pluginRegistry);
+    }
+  } catch (e) {
+    console.error(`[CONFIG] Failed to load: ${e.message}`);
+  }
+
+  // Show history summary
+  const history = loadHistory(PROJECT_CWD);
+  if (history.length > 0) {
+    const stats = getHistoryStats(history);
+    console.log(`[HISTORY] ${stats.totalRuns} previous runs (${stats.successRate}% success rate)`);
+  }
 
   if (args.spec || args.resume || args.prompt) {
     startOrchestrator();

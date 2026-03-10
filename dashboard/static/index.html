@@ -5,254 +5,653 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Claude Orchestrator — Dashboard</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'SF Mono', 'Fira Code', monospace; background: #0d1117; color: #c9d1d9; padding: 20px; }
-    h1 { color: #58a6ff; margin-bottom: 4px; font-size: 1.4em; }
-    .subtitle { color: #8b949e; font-size: 0.8em; margin-bottom: 20px; }
-    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
-    .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 14px; }
-    .card h2 { color: #8b949e; font-size: 0.75em; text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.05em; }
-    .stat { font-size: 1.6em; font-weight: bold; }
-    .stat.ok { color: #3fb950; }
-    .stat.warn { color: #d29922; }
-    .stat.err { color: #f85149; }
-    .stat.info { color: #58a6ff; }
+    :root {
+      --bg-primary: #0d1117;
+      --bg-secondary: #161b22;
+      --bg-tertiary: #1c2128;
+      --bg-active: #1f2937;
+      --border: #30363d;
+      --border-focus: #58a6ff;
+      --text-primary: #e6edf3;
+      --text-secondary: #8b949e;
+      --text-muted: #6e7681;
+      --blue: #58a6ff;
+      --green: #3fb950;
+      --yellow: #d29922;
+      --orange: #db6d28;
+      --red: #f85149;
+      --purple: #d2a8ff;
+      --cyan: #79c0ff;
+    }
 
-    .controls { margin-bottom: 16px; display: flex; gap: 8px; }
-    .btn { padding: 6px 16px; border-radius: 6px; border: 1px solid #30363d; background: #21262d;
-           color: #c9d1d9; cursor: pointer; font-family: inherit; font-size: 0.8em; }
-    .btn:hover { background: #30363d; }
-    .btn.danger { border-color: #f85149; color: #f85149; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      line-height: 1.5;
+    }
+
+    /* ── Layout ── */
+    .app { display: grid; grid-template-columns: 320px 1fr; grid-template-rows: 56px 1fr; height: 100vh; }
+    .header { grid-column: 1 / -1; background: var(--bg-secondary); border-bottom: 1px solid var(--border);
+              display: flex; align-items: center; padding: 0 20px; gap: 16px; }
+    .sidebar { background: var(--bg-secondary); border-right: 1px solid var(--border); overflow-y: auto; padding: 12px; }
+    .main { overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+
+    /* ── Header ── */
+    .header h1 { font-size: 1.1em; color: var(--blue); font-weight: 600; white-space: nowrap; }
+    .header .mode-badge {
+      padding: 3px 10px; border-radius: 12px; font-size: 0.75em; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.05em;
+      background: #58a6ff22; color: var(--blue); border: 1px solid #58a6ff44;
+    }
+    .header .status-pill {
+      padding: 3px 10px; border-radius: 12px; font-size: 0.75em; font-weight: 600;
+      display: flex; align-items: center; gap: 5px;
+    }
+    .status-pill .dot { width: 7px; height: 7px; border-radius: 50%; }
+    .status-pill.running { background: #3fb95022; color: var(--green); border: 1px solid #3fb95044; }
+    .status-pill.running .dot { background: var(--green); animation: pulse 2s infinite; }
+    .status-pill.completed { background: #3fb95022; color: var(--green); border: 1px solid #3fb95044; }
+    .status-pill.completed .dot { background: var(--green); }
+    .status-pill.stopped, .status-pill.crashed, .status-pill.failed {
+      background: #f8514922; color: var(--red); border: 1px solid #f8514944;
+    }
+    .status-pill.stopped .dot, .status-pill.crashed .dot, .status-pill.failed .dot { background: var(--red); }
+    .status-pill.restarting { background: #d2992222; color: var(--yellow); border: 1px solid #d2992244; }
+    .status-pill.restarting .dot { background: var(--yellow); animation: pulse 1s infinite; }
+    .header .spacer { flex: 1; }
+    .header .project-path { color: var(--text-muted); font-size: 0.78em; font-family: 'SF Mono', monospace; }
+    .header .ws-indicator { display: flex; align-items: center; gap: 5px; font-size: 0.75em; color: var(--text-muted); }
+    .ws-indicator .dot { width: 6px; height: 6px; border-radius: 50%; }
+    .ws-indicator .dot.on { background: var(--green); }
+    .ws-indicator .dot.off { background: var(--red); }
+
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+    /* ── Stat Cards ── */
+    .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+    .stat-card {
+      background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px;
+      padding: 12px 14px;
+    }
+    .stat-card .label { font-size: 0.7em; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 4px; }
+    .stat-card .value { font-size: 1.5em; font-weight: 700; }
+    .stat-card .value.green { color: var(--green); }
+    .stat-card .value.yellow { color: var(--yellow); }
+    .stat-card .value.red { color: var(--red); }
+    .stat-card .value.blue { color: var(--blue); }
+    .stat-card .value.purple { color: var(--purple); }
+
+    /* ── Progress Bar ── */
+    .progress-section { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+    .progress-header { display: flex; justify-content: space-between; margin-bottom: 8px; }
+    .progress-header .title { font-size: 0.85em; font-weight: 600; }
+    .progress-header .pct { font-size: 0.85em; color: var(--blue); font-weight: 600; }
+    .progress-bar { height: 8px; background: var(--bg-primary); border-radius: 4px; overflow: hidden; }
+    .progress-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; background: linear-gradient(90deg, var(--blue), var(--green)); }
+
+    /* ── Sidebar Phases ── */
+    .sidebar-title { font-size: 0.7em; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); padding: 8px 4px 6px; }
+    .phase-item {
+      padding: 10px 12px; border-radius: 6px; margin-bottom: 4px; cursor: default;
+      border: 1px solid transparent; transition: background 0.15s;
+    }
+    .phase-item:hover { background: var(--bg-tertiary); }
+    .phase-item.active { border-color: var(--border-focus); background: var(--bg-active); }
+    .phase-item .phase-header { display: flex; align-items: center; gap: 8px; }
+    .phase-item .phase-icon { width: 18px; height: 18px; border-radius: 50%; display: flex;
+      align-items: center; justify-content: center; font-size: 0.65em; flex-shrink: 0; }
+    .phase-icon.pending { background: var(--bg-primary); border: 2px solid var(--border); color: var(--text-muted); }
+    .phase-icon.running { background: var(--blue); color: white; }
+    .phase-icon.done { background: var(--green); color: white; }
+    .phase-icon.failed { background: var(--red); color: white; }
+    .phase-icon.gate_check { background: var(--yellow); color: white; }
+    .phase-item .phase-name { font-size: 0.82em; font-weight: 500; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .phase-item .phase-tasks { font-size: 0.7em; color: var(--text-muted); margin-top: 4px; margin-left: 26px; }
+
+    /* ── Task List ── */
+    .task-section { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; }
+    .task-section-header { padding: 12px 14px; border-bottom: 1px solid var(--border); font-size: 0.85em; font-weight: 600; }
+    .task-item {
+      padding: 10px 14px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: flex-start; gap: 10px;
+    }
+    .task-item:last-child { border-bottom: none; }
+    .task-status-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
+    .task-status-dot.pending { background: var(--text-muted); }
+    .task-status-dot.running { background: var(--blue); animation: pulse 1.5s infinite; }
+    .task-status-dot.reviewing { background: var(--purple); animation: pulse 1.5s infinite; }
+    .task-status-dot.fixing { background: var(--orange); animation: pulse 1.5s infinite; }
+    .task-status-dot.done { background: var(--green); }
+    .task-status-dot.failed { background: var(--red); }
+    .task-status-dot.skipped { background: var(--text-muted); opacity: 0.5; }
+    .task-body { flex: 1; min-width: 0; }
+    .task-id { font-size: 0.72em; color: var(--text-muted); font-family: 'SF Mono', monospace; }
+    .task-prompt { font-size: 0.82em; color: var(--text-primary); margin-top: 2px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .task-meta { display: flex; gap: 12px; margin-top: 4px; }
+    .task-meta span { font-size: 0.7em; color: var(--text-muted); }
+    .task-score { font-weight: 600; }
+    .task-score.high { color: var(--green); }
+    .task-score.mid { color: var(--yellow); }
+    .task-score.low { color: var(--red); }
+
+    /* ── Log ── */
+    .log-section { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; flex: 1; min-height: 200px; display: flex; flex-direction: column; }
+    .log-header { padding: 10px 14px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+    .log-header .title { font-size: 0.85em; font-weight: 600; }
+    .log-header .controls { display: flex; gap: 6px; }
+    .log-body { flex: 1; overflow-y: auto; padding: 8px 12px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.73em; line-height: 1.6; }
+    .log-line { color: var(--text-muted); white-space: pre-wrap; word-break: break-all; }
+    .log-line.state { color: var(--blue); }
+    .log-line.error { color: var(--red); }
+    .log-line.orch { color: var(--purple); }
+    .log-line.success { color: var(--green); }
+
+    /* ── Buttons ── */
+    .btn {
+      padding: 5px 12px; border-radius: 6px; border: 1px solid var(--border);
+      background: var(--bg-tertiary); color: var(--text-secondary);
+      cursor: pointer; font-size: 0.75em; font-family: inherit; transition: all 0.15s;
+    }
+    .btn:hover { background: var(--border); color: var(--text-primary); }
+    .btn.danger { border-color: #f8514966; color: var(--red); }
     .btn.danger:hover { background: #f8514922; }
-    .btn.primary { border-color: #3fb950; color: #3fb950; }
+    .btn.primary { border-color: #3fb95066; color: var(--green); }
     .btn.primary:hover { background: #3fb95022; }
 
-    .section-title { color: #8b949e; font-size: 0.85em; margin: 16px 0 8px; text-transform: uppercase; }
+    /* ── History ── */
+    .history-section { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; }
+    .history-header { padding: 12px 14px; border-bottom: 1px solid var(--border); font-size: 0.85em; font-weight: 600; }
+    .history-item {
+      padding: 8px 14px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 10px; font-size: 0.78em;
+    }
+    .history-item:last-child { border-bottom: none; }
+    .history-mode { padding: 2px 8px; border-radius: 4px; font-size: 0.8em; font-weight: 600;
+      background: var(--bg-tertiary); color: var(--text-secondary); }
+    .history-status { font-weight: 600; }
+    .history-status.completed { color: var(--green); }
+    .history-status.failed { color: var(--red); }
 
-    .log { background: #010409; border: 1px solid #30363d; border-radius: 8px; padding: 12px;
-           max-height: 400px; overflow-y: auto; font-size: 0.78em; line-height: 1.5; }
-    .log-entry { padding: 1px 0; color: #8b949e; white-space: pre-wrap; word-break: break-all; }
-    .log-entry.state { color: #58a6ff; }
-    .log-entry.error { color: #f85149; }
-    .log-entry.orch { color: #d2a8ff; }
-    .log-entry.success { color: #3fb950; }
-
-    .ws-status { position: fixed; top: 12px; right: 20px; font-size: 0.75em; display: flex; align-items: center; gap: 6px; }
-    .ws-dot { width: 8px; height: 8px; border-radius: 50%; }
-    .ws-dot.connected { background: #3fb950; }
-    .ws-dot.disconnected { background: #f85149; }
-
-    @media (max-width: 768px) {
-      .grid { grid-template-columns: 1fr 1fr; }
+    /* ── Responsive ── */
+    @media (max-width: 900px) {
+      .app { grid-template-columns: 1fr; }
+      .sidebar { display: none; }
     }
   </style>
 </head>
 <body>
-  <h1>Claude Orchestrator</h1>
-  <div class="subtitle" id="projectPath">—</div>
+  <div class="app">
+    <!-- Header -->
+    <div class="header">
+      <h1>Claude Orchestrator</h1>
+      <div class="mode-badge" id="modeBadge">—</div>
+      <div class="status-pill stopped" id="statusPill">
+        <div class="dot"></div>
+        <span id="statusText">Stopped</span>
+      </div>
+      <div class="spacer"></div>
+      <div class="project-path" id="projectPath">—</div>
+      <div class="ws-indicator">
+        <div class="dot off" id="wsDot"></div>
+        <span id="wsText">Offline</span>
+      </div>
+    </div>
 
-  <div class="ws-status">
-    <div class="ws-dot disconnected" id="wsDot"></div>
-    <span id="wsText">Disconnected</span>
+    <!-- Sidebar: Phases -->
+    <div class="sidebar">
+      <div class="sidebar-title">Phases</div>
+      <div id="phaseList"></div>
+
+      <div class="sidebar-title" style="margin-top: 16px">Controls</div>
+      <div style="display: flex; gap: 6px; padding: 4px;">
+        <button class="btn primary" onclick="restartOrch()" style="flex:1">Restart</button>
+        <button class="btn danger" onclick="stopOrch()" style="flex:1">Stop</button>
+      </div>
+
+      <div class="sidebar-title" style="margin-top: 16px">Run History</div>
+      <div id="historyList" style="font-size: 0.8em; color: var(--text-muted);">No history</div>
+    </div>
+
+    <!-- Main content -->
+    <div class="main">
+      <!-- Stats row -->
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="label">Tasks</div>
+          <div class="value blue" id="taskProgress">0/0</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Phases</div>
+          <div class="value blue" id="phaseProgress">0/0</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Avg Score</div>
+          <div class="value green" id="avgScore">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Uptime</div>
+          <div class="value" id="uptime" style="color: var(--text-secondary)">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Restarts</div>
+          <div class="value" id="restarts" style="color: var(--text-secondary)">0</div>
+        </div>
+      </div>
+
+      <!-- Progress bar -->
+      <div class="progress-section">
+        <div class="progress-header">
+          <span class="title">Overall Progress</span>
+          <span class="pct" id="progressPct">0%</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+        </div>
+      </div>
+
+      <!-- Current phase tasks -->
+      <div class="task-section" id="taskSection">
+        <div class="task-section-header" id="taskSectionHeader">Tasks</div>
+        <div id="taskList">
+          <div class="task-item">
+            <div style="color: var(--text-muted); font-size: 0.82em; padding: 8px;">Waiting for orchestrator...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Log -->
+      <div class="log-section">
+        <div class="log-header">
+          <span class="title">Live Log</span>
+          <div class="controls">
+            <button class="btn" onclick="clearLog()">Clear</button>
+          </div>
+        </div>
+        <div class="log-body" id="log"></div>
+      </div>
+    </div>
   </div>
-
-  <div class="grid">
-    <div class="card">
-      <h2>Agent State</h2>
-      <div class="stat" id="agentState">—</div>
-    </div>
-    <div class="card">
-      <h2>Orchestrator</h2>
-      <div class="stat" id="orchStatus">—</div>
-    </div>
-    <div class="card">
-      <h2>Restarts</h2>
-      <div class="stat" id="restarts">0</div>
-    </div>
-    <div class="card">
-      <h2>Uptime</h2>
-      <div class="stat info" id="uptime">—</div>
-    </div>
-  </div>
-
-  <div class="controls">
-    <button class="btn primary" onclick="restartOrch()">Restart Orchestrator</button>
-    <button class="btn danger" onclick="stopOrch()">Stop</button>
-  </div>
-
-  <div class="section-title">Live Log</div>
-  <div class="log" id="log"></div>
 
   <script>
+    // ── State ──────────────────────────────────────────────
     const PORT = location.port || 3111;
     const BASE = `http://${location.hostname}:${PORT}`;
     const WS_URL = `ws://${location.hostname}:${PORT}`;
     let ws;
+    let phases = [];
+    let selectedPhaseIdx = -1;
+    let orchStatus = "stopped";
+    let orchMode = "—";
 
-    // ── WebSocket ───────────────────────────────────────────────
+    // ── WebSocket ─────────────────────────────────────────
     function connect() {
       ws = new WebSocket(WS_URL);
 
       ws.onopen = () => {
-        document.getElementById('wsDot').className = 'ws-dot connected';
-        document.getElementById('wsText').textContent = 'Connected';
+        document.getElementById('wsDot').className = 'dot on';
+        document.getElementById('wsText').textContent = 'Live';
         addLog('Connected to supervisor', 'success');
       };
 
       ws.onclose = () => {
-        document.getElementById('wsDot').className = 'ws-dot disconnected';
+        document.getElementById('wsDot').className = 'dot off';
         document.getElementById('wsText').textContent = 'Reconnecting...';
         setTimeout(connect, 3000);
       };
 
       ws.onmessage = (evt) => {
         const d = JSON.parse(evt.data);
-
-        switch (d.type) {
-          case 'initial_state':
-            setAgentState(d.agent_state || 'unknown');
-            if (d.orchestrator) setOrchStatus(d.orchestrator.status, d.orchestrator.restarts);
-            if (d.project_cwd) document.getElementById('projectPath').textContent = d.project_cwd;
-            break;
-
-          case 'plan_ready':
-            addLog(`Plan ready: ${d.phases} phases, ${d.totalTasks} tasks`, 'success');
-            break;
-
-          case 'phase_start':
-            addLog(`Phase started: ${d.name} (${d.phaseId})`, 'state');
-            break;
-
-          case 'phase_done':
-            addLog(`Phase done: ${d.phaseId}`, 'success');
-            break;
-
-          case 'task_start':
-            addLog(`Task started: ${d.taskId}`, 'orch');
-            break;
-
-          case 'task_done':
-            addLog(`Task done: ${d.taskId} (score: ${d.score})`, 'success');
-            break;
-
-          case 'task_reviewed':
-            addLog(`Review: ${d.taskId} — score ${d.score}, ${d.approved ? 'APPROVED' : 'REJECTED'}`, d.approved ? 'success' : 'error');
-            break;
-
-          case 'task_timeout':
-            addLog(`Task TIMEOUT: ${d.taskId}`, 'error');
-            break;
-
-          case 'run_complete':
-            addLog(`Run complete: ${d.status} — ${d.doneTasks}/${d.totalTasks} tasks in ${Math.floor(d.elapsed/60)}m`, 'success');
-            setOrchStatus(d.status === 'completed' ? 'completed' : 'stopped');
-            break;
-
-          case 'error':
-            addLog(`ERROR: ${d.message}`, 'error');
-            break;
-
-          case 'state_change':
-            setAgentState(d.state);
-            addLog(`Agent → ${d.state}`, 'state');
-            break;
-
-          case 'turn_complete':
-            addLog(`Turn complete (${d.duration_ms}ms)`, 'success');
-            break;
-
-          case 'orchestrator_started':
-            setOrchStatus('running', d.restart);
-            addLog(`Orchestrator started (PID: ${d.pid}, restart #${d.restart})`, 'orch');
-            break;
-
-          case 'orchestrator_completed':
-            setOrchStatus('completed', null);
-            addLog('Orchestrator completed successfully!', 'success');
-            break;
-
-          case 'orchestrator_crashed':
-            setOrchStatus('crashed', d.restarts);
-            addLog(`Orchestrator CRASHED (exit: ${d.exit_code}, signal: ${d.signal})`, 'error');
-            break;
-
-          case 'orchestrator_restarting':
-            setOrchStatus('restarting', d.attempt);
-            addLog(`Restarting in ${d.in_ms / 1000}s (attempt ${d.attempt})...`, 'orch');
-            break;
-
-          case 'orchestrator_max_restarts':
-            setOrchStatus('stopped', d.restarts);
-            addLog(`Max restarts reached (${d.restarts}). Stopped.`, 'error');
-            break;
-
-          case 'orchestrator_spawn_error':
-            addLog(`Spawn error: ${d.error}`, 'error');
-            break;
-
-          case 'log':
-            addLog(d.text, d.text.includes('[ERR]') ? 'error' : 'orch');
-            break;
-
-          case 'session_start':
-            addLog(`New session: ${d.jsonl_path.split(/[\\/]/).pop()}`, 'state');
-            break;
-        }
+        handleEvent(d);
       };
     }
 
-    // ── UI updates ──────────────────────────────────────────────
-    function setAgentState(s) {
-      const el = document.getElementById('agentState');
-      el.textContent = s || '—';
-      el.className = 'stat ' + ({
-        idle: 'ok', working: 'warn', responding: 'info', exited: 'err', unknown: ''
-      }[s] || '');
-    }
+    function handleEvent(d) {
+      switch (d.type) {
+        case 'initial_state':
+          if (d.project_cwd) document.getElementById('projectPath').textContent = d.project_cwd;
+          if (d.orchestrator) {
+            setStatus(d.orchestrator.status, d.orchestrator.restarts);
+            if (d.mode) setMode(d.mode);
+            if (d.phases) {
+              phases = d.phases;
+              renderPhases();
+              updateStats();
+              if (selectedPhaseIdx < 0 && phases.length > 0) selectPhase(0);
+            }
+          }
+          if (d.history) renderHistory(d.history);
+          break;
 
-    function setOrchStatus(s, restarts) {
-      const el = document.getElementById('orchStatus');
-      el.textContent = s || '—';
-      el.className = 'stat ' + ({
-        running: 'ok', completed: 'ok', starting: 'warn',
-        restarting: 'warn', crashed: 'err', stopped: 'err'
-      }[s] || '');
-      if (restarts !== null && restarts !== undefined) {
-        const re = document.getElementById('restarts');
-        re.textContent = restarts;
-        re.className = 'stat ' + (restarts > 0 ? 'warn' : 'ok');
+        case 'plan_ready':
+          addLog(`Plan ready: ${d.phases} phases, ${d.totalTasks} tasks`, 'success');
+          break;
+
+        case 'state_update':
+          if (d.phases) {
+            phases = d.phases;
+            renderPhases();
+            updateStats();
+            renderTasks();
+          }
+          if (d.status) setStatus(d.status);
+          if (d.mode) setMode(d.mode);
+          break;
+
+        case 'phase_start':
+          updatePhaseStatus(d.phaseId, 'running');
+          addLog(`Phase started: ${d.name || d.phaseId}`, 'state');
+          // Auto-select running phase
+          const runIdx = phases.findIndex(p => p.id === d.phaseId);
+          if (runIdx >= 0) selectPhase(runIdx);
+          break;
+
+        case 'phase_done':
+          updatePhaseStatus(d.phaseId, 'done');
+          addLog(`Phase done: ${d.phaseId}`, 'success');
+          break;
+
+        case 'task_start':
+          updateTaskStatus(d.taskId, d.phaseId, 'running');
+          addLog(`Task started: ${d.taskId}`, 'orch');
+          break;
+
+        case 'task_done':
+          updateTaskStatus(d.taskId, null, 'done', d.score);
+          addLog(`Task done: ${d.taskId} (score: ${d.score})`, 'success');
+          updateStats();
+          break;
+
+        case 'task_reviewing':
+          updateTaskStatus(d.taskId, null, 'reviewing');
+          break;
+
+        case 'task_reviewed':
+          addLog(`Review: ${d.taskId} — score ${d.score}, ${d.approved ? 'APPROVED' : 'REJECTED'}`, d.approved ? 'success' : 'error');
+          break;
+
+        case 'task_timeout':
+          updateTaskStatus(d.taskId, null, 'failed');
+          addLog(`Task TIMEOUT: ${d.taskId}`, 'error');
+          break;
+
+        case 'run_complete':
+          setStatus(d.status === 'completed' ? 'completed' : 'stopped');
+          addLog(`Run complete: ${d.status} — ${d.doneTasks}/${d.totalTasks} tasks in ${Math.floor(d.elapsed/60)}m`, 'success');
+          break;
+
+        case 'error':
+          addLog(`ERROR: ${d.message}`, 'error');
+          break;
+
+        case 'orchestrator_started':
+          setStatus('running', d.restart);
+          addLog(`Orchestrator started (restart #${d.restart})`, 'orch');
+          break;
+
+        case 'orchestrator_completed':
+          setStatus('completed');
+          addLog('Orchestrator completed!', 'success');
+          break;
+
+        case 'orchestrator_crashed':
+          setStatus('crashed', d.restarts);
+          addLog(`Orchestrator CRASHED (exit: ${d.exit_code || 'unknown'})`, 'error');
+          break;
+
+        case 'orchestrator_restarting':
+          setStatus('restarting', d.attempt);
+          addLog(`Restarting in ${d.in_ms/1000}s (attempt ${d.attempt})...`, 'orch');
+          break;
+
+        case 'orchestrator_max_restarts':
+          setStatus('stopped', d.restarts);
+          addLog(`Max restarts reached (${d.restarts}). Stopped.`, 'error');
+          break;
+
+        case 'log':
+          addLog(d.text, d.text?.includes('[ERR]') ? 'error' : 'orch');
+          break;
+
+        case 'state_change':
+          addLog(`Agent → ${d.state}`, 'state');
+          break;
+
+        case 'turn_complete':
+          addLog(`Turn complete (${d.durationMs || d.duration_ms || 0}ms)`, 'success');
+          break;
       }
     }
 
+    // ── Render phases sidebar ─────────────────────────────
+    function renderPhases() {
+      const container = document.getElementById('phaseList');
+      container.innerHTML = '';
+
+      phases.forEach((phase, idx) => {
+        const el = document.createElement('div');
+        el.className = `phase-item${idx === selectedPhaseIdx ? ' active' : ''}`;
+        el.onclick = () => selectPhase(idx);
+
+        const doneTasks = phase.tasks.filter(t => t.status === 'done').length;
+        const totalTasks = phase.tasks.length;
+        const iconClass = phase.status || 'pending';
+        const iconText = iconClass === 'done' ? '✓' : iconClass === 'running' ? '▶' : iconClass === 'failed' ? '✕' : (idx + 1);
+
+        el.innerHTML = `
+          <div class="phase-header">
+            <div class="phase-icon ${iconClass}">${iconText}</div>
+            <div class="phase-name" title="${phase.name}">${phase.name || phase.id}</div>
+          </div>
+          <div class="phase-tasks">${doneTasks}/${totalTasks} tasks</div>
+        `;
+        container.appendChild(el);
+      });
+    }
+
+    function selectPhase(idx) {
+      selectedPhaseIdx = idx;
+      renderPhases();
+      renderTasks();
+    }
+
+    // ── Render tasks ──────────────────────────────────────
+    function renderTasks() {
+      if (selectedPhaseIdx < 0 || !phases[selectedPhaseIdx]) return;
+      const phase = phases[selectedPhaseIdx];
+      document.getElementById('taskSectionHeader').textContent = `${phase.name || phase.id} — Tasks`;
+
+      const container = document.getElementById('taskList');
+      container.innerHTML = '';
+
+      if (phase.tasks.length === 0) {
+        container.innerHTML = '<div class="task-item"><div style="color:var(--text-muted);font-size:0.82em;padding:8px;">No tasks</div></div>';
+        return;
+      }
+
+      phase.tasks.forEach(task => {
+        const el = document.createElement('div');
+        el.className = 'task-item';
+
+        let scoreClass = '';
+        if (task.reviewScore >= 8) scoreClass = 'high';
+        else if (task.reviewScore >= 6) scoreClass = 'mid';
+        else if (task.reviewScore > 0) scoreClass = 'low';
+
+        const scoreText = task.reviewScore > 0 ? task.reviewScore : '—';
+
+        el.innerHTML = `
+          <div class="task-status-dot ${task.status}"></div>
+          <div class="task-body">
+            <div class="task-id">${task.id}</div>
+            <div class="task-prompt" title="${esc(task.prompt)}">${esc(task.prompt.slice(0, 200))}</div>
+            <div class="task-meta">
+              <span>Status: <strong>${task.status}</strong></span>
+              <span>Score: <span class="task-score ${scoreClass}">${scoreText}</span></span>
+              ${task.retries > 0 ? `<span>Retries: ${task.retries}</span>` : ''}
+            </div>
+          </div>
+        `;
+        container.appendChild(el);
+      });
+    }
+
+    // ── Update helpers ────────────────────────────────────
+    function updatePhaseStatus(phaseId, status) {
+      const phase = phases.find(p => p.id === phaseId);
+      if (phase) {
+        phase.status = status;
+        renderPhases();
+      }
+    }
+
+    function updateTaskStatus(taskId, phaseId, status, score) {
+      for (const phase of phases) {
+        const task = phase.tasks.find(t => t.id === taskId);
+        if (task) {
+          task.status = status;
+          if (score !== undefined) task.reviewScore = score;
+          break;
+        }
+      }
+      renderTasks();
+    }
+
+    function updateStats() {
+      const totalTasks = phases.reduce((s, p) => s + p.tasks.length, 0);
+      const doneTasks = phases.reduce((s, p) => s + p.tasks.filter(t => t.status === 'done').length, 0);
+      const donePhases = phases.filter(p => p.status === 'done').length;
+      const pct = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
+
+      document.getElementById('taskProgress').textContent = `${doneTasks}/${totalTasks}`;
+      document.getElementById('phaseProgress').textContent = `${donePhases}/${phases.length}`;
+      document.getElementById('progressPct').textContent = `${pct}%`;
+      document.getElementById('progressFill').style.width = `${pct}%`;
+
+      // Average score
+      let totalScore = 0, scoredCount = 0;
+      for (const p of phases) {
+        for (const t of p.tasks) {
+          if (t.reviewScore > 0) { totalScore += t.reviewScore; scoredCount++; }
+        }
+      }
+      const avg = scoredCount > 0 ? (totalScore / scoredCount).toFixed(1) : '—';
+      const avgEl = document.getElementById('avgScore');
+      avgEl.textContent = avg;
+      if (avg !== '—') {
+        avgEl.className = 'value ' + (avg >= 8 ? 'green' : avg >= 6 ? 'yellow' : 'red');
+      }
+    }
+
+    function setStatus(status, restarts) {
+      orchStatus = status || 'stopped';
+      const pill = document.getElementById('statusPill');
+      pill.className = `status-pill ${orchStatus}`;
+      document.getElementById('statusText').textContent = orchStatus;
+
+      if (restarts !== null && restarts !== undefined) {
+        const el = document.getElementById('restarts');
+        el.textContent = restarts;
+        el.className = 'value ' + (restarts > 0 ? 'yellow' : '');
+        el.style.color = restarts > 0 ? '' : 'var(--text-secondary)';
+      }
+    }
+
+    function setMode(mode) {
+      orchMode = mode;
+      document.getElementById('modeBadge').textContent = mode;
+    }
+
+    // ── Log ──────────────────────────────────────────────
     function addLog(text, cls = '') {
       const log = document.getElementById('log');
-      const entry = document.createElement('div');
-      entry.className = 'log-entry ' + cls;
+      const line = document.createElement('div');
+      line.className = 'log-line ' + cls;
       const time = new Date().toLocaleTimeString();
-      entry.textContent = `[${time}] ${text}`;
-      log.appendChild(entry);
+      line.textContent = `[${time}] ${text}`;
+      log.appendChild(line);
       log.scrollTop = log.scrollHeight;
       while (log.children.length > 500) log.removeChild(log.firstChild);
     }
 
-    // ── Health polling ──────────────────────────────────────────
+    function clearLog() {
+      document.getElementById('log').innerHTML = '';
+    }
+
+    // ── History ──────────────────────────────────────────
+    function renderHistory(history) {
+      const container = document.getElementById('historyList');
+      if (!history || history.length === 0) {
+        container.innerHTML = '<div style="padding: 4px; font-size: 0.82em; color: var(--text-muted);">No previous runs</div>';
+        return;
+      }
+
+      container.innerHTML = '';
+      // Show last 10 runs
+      const recent = history.slice(-10).reverse();
+      for (const run of recent) {
+        const el = document.createElement('div');
+        el.style.cssText = 'padding: 6px 4px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px; font-size: 0.78em;';
+
+        const dur = run.durationMs ? formatDuration(Math.floor(run.durationMs / 1000)) : '—';
+        const date = run.startedAt ? new Date(run.startedAt).toLocaleDateString() : '';
+        const statusColor = run.status === 'completed' ? 'var(--green)' : 'var(--red)';
+
+        el.innerHTML = `
+          <span class="history-mode">${run.mode || '?'}</span>
+          <span style="color: ${statusColor}; font-weight: 600;">${run.status}</span>
+          <span style="color: var(--text-muted)">${run.completedTasks || 0}/${run.totalTasks || 0}</span>
+          <span style="flex:1"></span>
+          <span style="color: var(--text-muted)">${dur}</span>
+        `;
+        container.appendChild(el);
+      }
+    }
+
+    // ── Health polling ────────────────────────────────────
     async function pollHealth() {
       try {
         const res = await fetch(`${BASE}/health`);
         const d = await res.json();
         document.getElementById('uptime').textContent = formatDuration(d.uptime_s);
-        setOrchStatus(d.orchestrator_status, d.orchestrator_restarts);
+        setStatus(d.orchestrator_status, d.orchestrator_restarts);
+      } catch {}
+    }
+
+    // Fetch full state periodically to sync phases
+    async function pollState() {
+      try {
+        const res = await fetch(`${BASE}/state`);
+        const d = await res.json();
+        if (d.orchestrator?.phases && d.orchestrator.phases.length > 0) {
+          phases = d.orchestrator.phases;
+          renderPhases();
+          updateStats();
+          renderTasks();
+        }
+        if (d.mode) setMode(d.mode);
+        if (d.history) renderHistory(d.history);
       } catch {}
     }
 
     function formatDuration(s) {
+      if (!s || s < 0) return '—';
       const h = Math.floor(s / 3600);
       const m = Math.floor((s % 3600) / 60);
+      const sec = Math.floor(s % 60);
       if (h > 0) return `${h}h ${m}m`;
-      return `${m}m ${s % 60}s`;
+      if (m > 0) return `${m}m ${sec}s`;
+      return `${sec}s`;
     }
 
-    // ── Controls ────────────────────────────────────────────────
+    function esc(str) {
+      return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    // ── Controls ─────────────────────────────────────────
     async function restartOrch() {
       if (!confirm('Restart orchestrator?')) return;
       await fetch(`${BASE}/restart`, { method: 'POST' });
@@ -265,10 +664,12 @@
       addLog('Manual stop requested', 'error');
     }
 
-    // ── Init ────────────────────────────────────────────────────
+    // ── Init ─────────────────────────────────────────────
     connect();
     setInterval(pollHealth, 5000);
+    setInterval(pollState, 10000);
     pollHealth();
+    setTimeout(pollState, 1000);
   </script>
 </body>
 </html>

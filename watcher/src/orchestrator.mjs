@@ -43,6 +43,7 @@ export class Orchestrator {
    * @param {boolean} [opts.verbose] - Verbose logging
    * @param {object} [opts.config] - Override DEFAULT_CONFIG values
    * @param {(event: object) => void} [opts.onEvent] - Event callback for dashboard
+   * @param {object} [opts.pluginRegistry] - Plugin registry for custom validators/hooks
    */
   constructor(opts) {
     this.cwd = opts.cwd;
@@ -54,6 +55,7 @@ export class Orchestrator {
     this.verbose = opts.verbose || false;
     this.config = { ...DEFAULT_CONFIG, ...opts.config };
     this.onEvent = opts.onEvent || (() => {});
+    this.pluginRegistry = opts.pluginRegistry || null;
 
     // Mode instance (set during plan generation)
     this._modeInstance = null;
@@ -323,6 +325,11 @@ export class Orchestrator {
     this._emit("task_done", { taskId: task.id, score: task.reviewScore });
     this._saveState();
 
+    // Plugin hook
+    if (this.pluginRegistry) {
+      await this.pluginRegistry.runHook("afterTask", task, phase);
+    }
+
     this._writeToolEnd(toolId, `${taskLabel} done (score: ${task.reviewScore})`);
     this._writeIdle(Date.now() - this.startedAt);
 
@@ -377,6 +384,10 @@ export class Orchestrator {
     // ── Phase-level validation ──────────────────────────────────────
     const skipValidation = this._modeInstance?.skipPhaseValidation;
     if (this.config.validationEnabled !== false && !skipValidation) {
+      // Run plugin hooks before validation
+      if (this.pluginRegistry) {
+        await this.pluginRegistry.runHook("beforePhaseValidation", phase, phaseIdx);
+      }
       const phaseValidation = await runPhaseValidation(phase.id, this.cwd, this.config);
 
       if (!phaseValidation.ok) {
