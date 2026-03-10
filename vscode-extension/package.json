@@ -1,0 +1,159 @@
+{
+  "name": "code-orchestrator",
+  "displayName": "Code Orchestrator",
+  "description": "Orchestrate AI coding agents from your editor. Right-click any file to build, fix, audit, review, or refactor with autonomous multi-phase execution.",
+  "version": "0.1.0",
+  "publisher": "fedevgonzalez",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fedevgonzalez/code-orchestrator"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "Machine Learning",
+    "Testing"
+  ],
+  "keywords": [
+    "claude",
+    "ai",
+    "orchestrator",
+    "code-review",
+    "autonomous",
+    "agent"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "icon": "media/icon.png",
+  "contributes": {
+    "commands": [
+      {
+        "command": "codeOrch.exec",
+        "title": "Code Orchestrator: Exec (Custom Prompt)"
+      },
+      {
+        "command": "codeOrch.build",
+        "title": "Code Orchestrator: Build from Spec"
+      },
+      {
+        "command": "codeOrch.fix",
+        "title": "Code Orchestrator: Fix"
+      },
+      {
+        "command": "codeOrch.audit",
+        "title": "Code Orchestrator: Audit"
+      },
+      {
+        "command": "codeOrch.review",
+        "title": "Code Orchestrator: Review"
+      },
+      {
+        "command": "codeOrch.refactor",
+        "title": "Code Orchestrator: Refactor"
+      },
+      {
+        "command": "codeOrch.test",
+        "title": "Code Orchestrator: Test"
+      },
+      {
+        "command": "codeOrch.feature",
+        "title": "Code Orchestrator: Feature"
+      },
+      {
+        "command": "codeOrch.stop",
+        "title": "Code Orchestrator: Stop"
+      },
+      {
+        "command": "codeOrch.dashboard",
+        "title": "Code Orchestrator: Open Dashboard"
+      },
+      {
+        "command": "codeOrch.logs",
+        "title": "Code Orchestrator: View Logs"
+      },
+      {
+        "command": "codeOrch.runFromFile",
+        "title": "Run with Code Orchestrator"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "codeOrch.runFromFile",
+          "group": "navigation@99",
+          "when": "resourceExtname == .md || resourceExtname == .txt || resourceExtname == .spec"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "codeOrch.runFromFile",
+          "group": "navigation@99",
+          "when": "resourceExtname == .md || resourceExtname == .txt || resourceExtname == .spec"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "codeOrchestrator",
+          "title": "Code Orchestrator",
+          "icon": "media/sidebar-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "codeOrchestrator": [
+        {
+          "type": "webview",
+          "id": "codeOrch.dashboardView",
+          "name": "Dashboard"
+        },
+        {
+          "id": "codeOrch.runsView",
+          "name": "Run History"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Code Orchestrator",
+      "properties": {
+        "codeOrchestrator.dashboardPort": {
+          "type": "number",
+          "default": 3160,
+          "description": "Dashboard port for the WebSocket connection"
+        },
+        "codeOrchestrator.autoOpenDashboard": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically open dashboard panel when a run starts"
+        },
+        "codeOrchestrator.defaultMode": {
+          "type": "string",
+          "default": "exec",
+          "enum": ["build", "feature", "fix", "audit", "test", "review", "refactor", "exec"],
+          "description": "Default orchestration mode for right-click actions"
+        },
+        "codeOrchestrator.token": {
+          "type": "string",
+          "default": "",
+          "description": "Authentication token for secured dashboard"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0",
+    "@vscode/vsce": "^2.22.0"
+  }
+}
