@@ -24,6 +24,7 @@
 import { resolve, dirname, basename } from "path";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { execSync } from "child_process";
+import { createServer } from "net";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -86,7 +87,7 @@ if (rawArgs.includes("--resume")) {
     console.error("Usage: node cli.mjs --resume <project-dir>");
     process.exit(1);
   }
-  startDaemon({ cwd: resolve(cwdArg), mode: "build", resume: true });
+  await startDaemon({ cwd: resolve(cwdArg), mode: "build", resume: true });
   process.exit(0);
 }
 
@@ -109,7 +110,7 @@ if (firstArg.endsWith(".md")) {
     console.error(`Error: spec file not found: ${specPath}`);
     process.exit(1);
   }
-  startDaemon({ cwd: dirname(specPath), mode: "build", specPath, dryRun: rawArgs.includes("--dry-run") });
+  await startDaemon({ cwd: dirname(specPath), mode: "build", specPath, dryRun: rawArgs.includes("--dry-run") });
   process.exit(0);
 }
 
@@ -129,7 +130,7 @@ if (mode === "build") {
     console.error(`Error: spec file not found: ${specPath}`);
     process.exit(1);
   }
-  startDaemon({ cwd: dirname(specPath), mode: "build", specPath, dryRun: rawArgs.includes("--dry-run") });
+  await startDaemon({ cwd: dirname(specPath), mode: "build", specPath, dryRun: rawArgs.includes("--dry-run") });
   process.exit(0);
 }
 
@@ -156,15 +157,16 @@ if (rawArgs.includes("--fix")) {
 
 const dryRun = rawArgs.includes("--dry-run");
 
-startDaemon({ cwd, mode, prompt, flags, dryRun });
+await startDaemon({ cwd, mode, prompt, flags, dryRun });
 
 // ── Functions ────────────────────────────────────────────────────────────
 
-function startDaemon({ cwd, mode, specPath, prompt, flags, resume, dryRun }) {
+async function startDaemon({ cwd, mode, specPath, prompt, flags, resume, dryRun }) {
   const watcherScript = resolve(__dirname, "watcher.mjs");
   const name = instanceName(cwd);
 
-  const port = 3111 + Math.abs(simpleHash(name)) % 89;
+  const basePort = 3111 + Math.abs(simpleHash(name)) % 89;
+  const port = await findAvailablePort(basePort, name);
 
   const devPortArg = getArgAfter("--dev-port");
   const computedDevPort = 3000 + Math.abs(simpleHash(name)) % 100;
@@ -285,6 +287,32 @@ function simpleHash(str) {
     hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
   }
   return hash;
+}
+
+/**
+ * Check if a port is available. If it's taken by another project's orchestrator,
+ * try subsequent ports until an open one is found.
+ */
+function findAvailablePort(preferred, instanceName) {
+  return new Promise((resolvePort) => {
+    const maxAttempts = 20;
+    let attempt = 0;
+
+    function tryPort(port) {
+      if (attempt++ >= maxAttempts) {
+        resolvePort(preferred);
+        return;
+      }
+      const srv = createServer();
+      srv.once("error", () => tryPort(port + 1));
+      // Bind on 0.0.0.0 (same as watcher.mjs) to detect real collisions
+      srv.listen(port, () => {
+        srv.close(() => resolvePort(port));
+      });
+    }
+
+    tryPort(preferred);
+  });
 }
 
 function run(cmd) {
