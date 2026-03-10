@@ -71,6 +71,11 @@ export const DEFAULT_CONFIG = {
   // Dashboard
   dashboardPort: 3111,
 
+  // Rate limiting / parallel execution
+  maxConcurrentClaude: 1,      // Max parallel Claude calls (1 = sequential)
+  claudeMinDelayMs: 1000,      // Minimum delay between Claude API calls
+  claudeMaxQueueSize: 100,     // Max queued rate limiter requests
+
   // Permissions — set to false to require Claude's built-in permission prompts
   allowUnsafePermissions: true,
 };

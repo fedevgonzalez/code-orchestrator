@@ -94,7 +94,7 @@ if (firstArg.endsWith(".md")) {
     console.error(`Error: spec file not found: ${specPath}`);
     process.exit(1);
   }
-  startDaemon({ cwd: dirname(specPath), mode: "build", specPath });
+  startDaemon({ cwd: dirname(specPath), mode: "build", specPath, dryRun: rawArgs.includes("--dry-run") });
   process.exit(0);
 }
 
@@ -114,7 +114,7 @@ if (mode === "build") {
     console.error(`Error: spec file not found: ${specPath}`);
     process.exit(1);
   }
-  startDaemon({ cwd: dirname(specPath), mode: "build", specPath });
+  startDaemon({ cwd: dirname(specPath), mode: "build", specPath, dryRun: rawArgs.includes("--dry-run") });
   process.exit(0);
 }
 
@@ -139,11 +139,13 @@ if (rawArgs.includes("--fix")) {
   flags.fix = true;
 }
 
-startDaemon({ cwd, mode, prompt, flags });
+const dryRun = rawArgs.includes("--dry-run");
+
+startDaemon({ cwd, mode, prompt, flags, dryRun });
 
 // ── Functions ────────────────────────────────────────────────────────────
 
-function startDaemon({ cwd, mode, specPath, prompt, flags, resume }) {
+function startDaemon({ cwd, mode, specPath, prompt, flags, resume, dryRun }) {
   const watcherScript = resolve(__dirname, "watcher.mjs");
   const name = instanceName(cwd);
 
@@ -179,6 +181,7 @@ function startDaemon({ cwd, mode, specPath, prompt, flags, resume }) {
 
   if (flags?.type) watcherArgs += ` --audit-type ${flags.type}`;
   if (flags?.fix) watcherArgs += " --fix";
+  if (dryRun) watcherArgs += " --dry-run";
 
   // Stop existing instance
   try { execSync(`npx pm2 delete ${name}`, { stdio: "ignore" }); } catch {}
@@ -306,6 +309,7 @@ function showHelp() {
     --type <type>      Audit type: security, performance, quality, a11y, full
     --fix              Auto-fix issues (audit/test modes)
     --no-review        Skip code review step
+    --dry-run          Generate plan without executing (preview mode)
 
   Examples:
     node cli.mjs build G:/projects/my-saas/spec.md

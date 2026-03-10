@@ -22,6 +22,7 @@ import { createMode } from "./planner.mjs";
 import { saveCheckpoint, loadCheckpoint, checkpointPath } from "./checkpoint.mjs";
 import { TaskStatus, PhaseStatus, DEFAULT_CONFIG, OrchestratorMode } from "./models.mjs";
 import { getJsonlDir } from "./jsonl.mjs";
+import { RateLimiter } from "./rate-limiter.mjs";
 import { existsSync, mkdirSync, appendFileSync } from "fs";
 import { join, basename } from "path";
 import { execSync } from "child_process";
@@ -56,6 +57,14 @@ export class Orchestrator {
     this.config = { ...DEFAULT_CONFIG, ...opts.config };
     this.onEvent = opts.onEvent || (() => {});
     this.pluginRegistry = opts.pluginRegistry || null;
+    this.dryRun = opts.dryRun || false;
+
+    // Rate limiter for Claude API calls
+    this._rateLimiter = new RateLimiter({
+      maxConcurrent: this.config.maxConcurrentClaude || 1,
+      minDelayMs: this.config.claudeMinDelayMs || 1000,
+      maxQueueSize: this.config.claudeMaxQueueSize || 100,
+    });
 
     // Mode instance (set during plan generation)
     this._modeInstance = null;
@@ -107,7 +116,9 @@ export class Orchestrator {
         timestamp: new Date().toISOString(),
       });
       appendFileSync(this._jsonlFile, line + "\n");
-    } catch {}
+    } catch (e) {
+      console.error(`[ORCH] JSONL write error: ${e.message}`);
+    }
   }
 
   _writeToolStart(toolName, description) {
@@ -185,7 +196,9 @@ export class Orchestrator {
         this._modeInstance = createMode(this.mode, {
           cwd: this.cwd, prompt: this.prompt, flags: this.flags,
         });
-      } catch {}
+      } catch (e) {
+        console.log(`[ORCH] Could not reconstruct mode "${this.mode}" on resume: ${e.message}`);
+      }
     }
 
     console.log(`[ORCH] Resumed: mode=${this.mode}, phase ${this.currentPhaseIdx}, task ${this.currentTaskIdx}`);
@@ -198,38 +211,44 @@ export class Orchestrator {
   // ── Send prompt to Claude (headless -p mode) ────────────────────────
 
   async _runPrompt(prompt, timeoutMs) {
-    const timeout = timeoutMs || this.config.turnTimeout;
+    return this._rateLimiter.wrap(async () => {
+      const timeout = timeoutMs || this.config.turnTimeout;
 
-    // Generate session ID on first call
-    if (!this.sessionId) {
-      this.sessionId = randomUUID();
-      this._firstCall = true;
-      console.log(`[ORCH] New Claude session: ${this.sessionId}`);
-    }
+      // Generate session ID on first call
+      if (!this.sessionId) {
+        this.sessionId = randomUUID();
+        this._firstCall = true;
+        console.log(`[ORCH] New Claude session: ${this.sessionId}`);
+      }
 
-    const start = Date.now();
-    console.log(`[ORCH] Sending prompt (${prompt.length} chars, session: ${this.sessionId.slice(0, 8)}...)`);
+      const start = Date.now();
+      const rlStatus = this._rateLimiter.getStatus();
+      if (rlStatus.queued > 0) {
+        console.log(`[ORCH] Rate limiter: ${rlStatus.active} active, ${rlStatus.queued} queued`);
+      }
+      console.log(`[ORCH] Sending prompt (${prompt.length} chars, session: ${this.sessionId.slice(0, 8)}...)`);
 
-    const result = await runClaudePrompt(prompt, this.cwd, {
-      sessionId: this.sessionId,
-      firstCall: this._firstCall,
-      timeoutMs: timeout,
-      onStderr: this.verbose ? (data) => process.stderr.write(`[CLAUDE] ${data}`) : null,
-      allowUnsafe: this.config.allowUnsafePermissions !== false,
+      const result = await runClaudePrompt(prompt, this.cwd, {
+        sessionId: this.sessionId,
+        firstCall: this._firstCall,
+        timeoutMs: timeout,
+        onStderr: this.verbose ? (data) => process.stderr.write(`[CLAUDE] ${data}`) : null,
+        allowUnsafe: this.config.allowUnsafePermissions !== false,
+      });
+
+      this._firstCall = false;
+      const elapsed = Math.floor((Date.now() - start) / 1000);
+      this.totalCostUsd += result.costUsd || 0;
+      console.log(`[ORCH] Response received (${elapsed}s, cost: $${result.costUsd.toFixed(4)}, total: $${this.totalCostUsd.toFixed(4)})`);
+
+      // Update session ID if Claude returned a different one
+      if (result.sessionId && result.sessionId !== this.sessionId) {
+        console.log(`[ORCH] Session ID updated: ${result.sessionId}`);
+        this.sessionId = result.sessionId;
+      }
+
+      return result;
     });
-
-    this._firstCall = false;
-    const elapsed = Math.floor((Date.now() - start) / 1000);
-    this.totalCostUsd += result.costUsd || 0;
-    console.log(`[ORCH] Response received (${elapsed}s, cost: $${result.costUsd.toFixed(4)}, total: $${this.totalCostUsd.toFixed(4)})`);
-
-    // Update session ID if Claude returned a different one
-    if (result.sessionId && result.sessionId !== this.sessionId) {
-      console.log(`[ORCH] Session ID updated: ${result.sessionId}`);
-      this.sessionId = result.sessionId;
-    }
-
-    return result;
   }
 
   _sleep(ms) {
@@ -374,34 +393,90 @@ export class Orchestrator {
     this._emit("phase_start", { phaseId: phase.id, name: phase.name });
     this._saveState();
 
-    for (let i = this.currentTaskIdx; i < phase.tasks.length; i++) {
-      const task = phase.tasks[i];
-      this.currentTaskIdx = i;
+    // Group tasks into batches: tasks without unmet dependencies can run in parallel
+    const executedTasks = new Set();
+    let hasProgress = true;
+    const phaseStartTime = Date.now();
 
-      if (task.dependsOn) {
-        const dep = phase.tasks.find((t) => t.id === task.dependsOn);
-        if (dep && dep.status !== TaskStatus.DONE) {
-          console.log(`[TASK] ${task.id}: Skipping (dependency ${task.dependsOn} not done)`);
-          task.status = TaskStatus.SKIPPED;
-          continue;
+    while (hasProgress) {
+      hasProgress = false;
+
+      // Check phase-level timeout before processing next batch
+      const phaseElapsed = Date.now() - phaseStartTime;
+      if (phaseElapsed > this.config.phaseTimeout) {
+        const elapsedMin = Math.floor(phaseElapsed / 60_000);
+        console.warn(`[PHASE] ${phase.id}: Phase timeout reached (${elapsedMin}m) — skipping remaining tasks`);
+        this._emit("phase_timeout", { phaseId: phase.id, elapsedMs: phaseElapsed });
+
+        // Mark all remaining pending tasks as SKIPPED
+        for (const task of phase.tasks) {
+          if (task.status === TaskStatus.PENDING || task.status === TaskStatus.RUNNING) {
+            task.status = TaskStatus.SKIPPED;
+            console.log(`[PHASE] ${phase.id}: Skipped task ${task.id} due to timeout`);
+          }
         }
+        break;
       }
 
-      if (task.status === TaskStatus.DONE) {
-        console.log(`[TASK] ${task.id}: Already done (resumed)`);
-        continue;
-      }
+      const batch = [];
 
-      const ok = await this._executeTask(task, phase);
-      if (!ok) {
-        task.retries++;
-        if (task.retries <= task.maxRetries) {
-          console.log(`[TASK] ${task.id}: Retrying (${task.retries}/${task.maxRetries})...`);
-          i--;
+      for (const task of phase.tasks) {
+        if (task.status === TaskStatus.DONE) {
+          executedTasks.add(task.id);
           continue;
         }
-        console.error(`[TASK] ${task.id}: FAILED after ${task.retries} retries`);
-        task.status = TaskStatus.FAILED;
+        if (task.status === TaskStatus.FAILED || task.status === TaskStatus.SKIPPED) continue;
+
+        // Check dependencies
+        if (task.dependsOn) {
+          const dep = phase.tasks.find((t) => t.id === task.dependsOn);
+          if (dep && dep.status !== TaskStatus.DONE) continue; // dependency not met
+        }
+
+        batch.push(task);
+      }
+
+      if (batch.length === 0) break;
+
+      // If parallel tasks enabled (maxConcurrentClaude > 1) and tasks are independent, run in parallel
+      const canParallel = this.config.maxConcurrentClaude > 1 && batch.length > 1;
+
+      if (canParallel) {
+        console.log(`[PHASE] Running ${batch.length} tasks in parallel...`);
+        const results = await Promise.all(
+          batch.map(async (task) => {
+            const ok = await this._executeTask(task, phase);
+            if (!ok) {
+              task.retries++;
+              if (task.retries <= task.maxRetries) {
+                console.log(`[TASK] ${task.id}: Will retry (${task.retries}/${task.maxRetries})...`);
+                task.status = TaskStatus.PENDING; // reset for retry
+                return { task, ok: false, retry: true };
+              }
+              console.error(`[TASK] ${task.id}: FAILED after ${task.retries} retries`);
+              task.status = TaskStatus.FAILED;
+            }
+            return { task, ok };
+          })
+        );
+        hasProgress = results.some(r => r.ok || r.retry);
+      } else {
+        // Sequential execution (default)
+        for (const task of batch) {
+          const ok = await this._executeTask(task, phase);
+          if (!ok) {
+            task.retries++;
+            if (task.retries <= task.maxRetries) {
+              console.log(`[TASK] ${task.id}: Retrying (${task.retries}/${task.maxRetries})...`);
+              task.status = TaskStatus.PENDING; // reset for retry loop
+              hasProgress = true;
+              continue;
+            }
+            console.error(`[TASK] ${task.id}: FAILED after ${task.retries} retries`);
+            task.status = TaskStatus.FAILED;
+          }
+          hasProgress = true;
+        }
       }
     }
 
@@ -614,6 +689,25 @@ export class Orchestrator {
         phases: this.phases.length,
         totalTasks: this.phases.reduce((s, p) => s + p.tasks.length, 0),
       });
+
+      // Dry-run mode: show the plan and exit without executing
+      if (this.dryRun) {
+        console.log("\n[DRY-RUN] Plan generated — showing without executing:\n");
+        for (const phase of this.phases) {
+          console.log(`  Phase: ${phase.id} — ${phase.name}`);
+          for (const task of phase.tasks) {
+            console.log(`    Task: ${task.id}`);
+            console.log(`      Prompt: ${task.prompt.slice(0, 120)}${task.prompt.length > 120 ? "..." : ""}`);
+            if (task.validate) console.log(`      Validate: ${task.validate}`);
+            if (task.dependsOn) console.log(`      Depends on: ${task.dependsOn}`);
+          }
+        }
+        console.log(`\n[DRY-RUN] Total: ${this.phases.length} phases, ${this.phases.reduce((s, p) => s + p.tasks.length, 0)} tasks`);
+        console.log("[DRY-RUN] No tasks were executed. Remove --dry-run to run.\n");
+        this.status = "completed";
+        this._emit("run_complete", { status: "completed", dryRun: true });
+        return;
+      }
 
       // No PTY spawn needed — each prompt is a separate claude -p invocation
       console.log(`[ORCH] Ready to execute ${this.phases.length} phases`);

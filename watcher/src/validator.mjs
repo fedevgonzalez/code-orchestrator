@@ -249,10 +249,41 @@ function normalizePhaseId(id) {
 // ── Build ─────────────────────────────────────────────────────────────
 
 /**
- * Run `npm run build` and return the result.
+ * Auto-detect the build command based on project ecosystem.
+ */
+function detectBuildCommand(cwd) {
+  if (existsSync(join(cwd, "package.json"))) return "npm run build";
+  if (existsSync(join(cwd, "Cargo.toml"))) return "cargo build";
+  if (existsSync(join(cwd, "go.mod"))) return "go build ./...";
+  if (existsSync(join(cwd, "pom.xml"))) return "mvn compile";
+  if (existsSync(join(cwd, "build.gradle")) || existsSync(join(cwd, "build.gradle.kts"))) return "./gradlew build";
+  if (existsSync(join(cwd, "Gemfile"))) return "bundle exec rake";
+  if (existsSync(join(cwd, "composer.json"))) return "composer install --no-dev";
+  if (existsSync(join(cwd, "pyproject.toml")) || existsSync(join(cwd, "setup.py"))) return "python -m py_compile $(find . -name '*.py' -not -path './venv/*' | head -20)";
+  return "npm run build"; // fallback
+}
+
+/**
+ * Auto-detect the test command based on project ecosystem.
+ */
+function detectTestCommand(cwd) {
+  if (existsSync(join(cwd, "package.json"))) return "npm test";
+  if (existsSync(join(cwd, "Cargo.toml"))) return "cargo test";
+  if (existsSync(join(cwd, "go.mod"))) return "go test ./...";
+  if (existsSync(join(cwd, "pom.xml"))) return "mvn test";
+  if (existsSync(join(cwd, "build.gradle")) || existsSync(join(cwd, "build.gradle.kts"))) return "./gradlew test";
+  if (existsSync(join(cwd, "Gemfile"))) return "bundle exec rspec";
+  if (existsSync(join(cwd, "composer.json"))) return "vendor/bin/phpunit";
+  if (existsSync(join(cwd, "pyproject.toml")) || existsSync(join(cwd, "requirements.txt"))) return "python -m pytest";
+  return "npm test"; // fallback
+}
+
+/**
+ * Run build and return the result.
+ * Auto-detects the build command if not configured.
  */
 export function runBuild(cwd, config = {}) {
-  const cmd = config.buildCommand || "npm run build";
+  const cmd = config.buildCommand || detectBuildCommand(cwd);
   console.log(`[VALIDATE] Running: ${cmd}`);
 
   try {
@@ -279,18 +310,20 @@ export function runBuild(cwd, config = {}) {
  * Checks if a test script exists in package.json first.
  */
 export function runTests(cwd, config = {}) {
-  // Check if there's a real test script
-  try {
-    const pkg = JSON.parse(readFileSync(join(cwd, "package.json"), "utf-8"));
-    const testScript = pkg.scripts?.test || "";
-    if (!testScript || testScript.includes("no test specified")) {
-      return { type: "test", ok: true, message: "No test script configured, skipping" };
+  // Check if there's a real test script (Node.js projects)
+  if (existsSync(join(cwd, "package.json"))) {
+    try {
+      const pkg = JSON.parse(readFileSync(join(cwd, "package.json"), "utf-8"));
+      const testScript = pkg.scripts?.test || "";
+      if (!testScript || testScript.includes("no test specified")) {
+        return { type: "test", ok: true, message: "No test script configured, skipping" };
+      }
+    } catch {
+      return { type: "test", ok: true, message: "Could not read package.json, skipping tests" };
     }
-  } catch {
-    return { type: "test", ok: true, message: "No package.json found, skipping tests" };
   }
 
-  const cmd = config.testCommand || "npm test";
+  const cmd = config.testCommand || detectTestCommand(cwd);
   console.log(`[VALIDATE] Running: ${cmd}`);
 
   try {
@@ -852,7 +885,9 @@ function checkOnboardingFiles(cwd) {
         f.includes("onboarding") || f.includes("walkme") || f.includes("tours") || f.includes("tour")
       );
       found.push(...files);
-    } catch {}
+    } catch (e) {
+      console.log(`[VALIDATE] Error scanning ${dir} for onboarding files: ${e.message}`);
+    }
   }
 
   // Also check for walkme plugin
@@ -897,7 +932,9 @@ function checkEmailFiles(cwd) {
         f.includes("email") && (f.endsWith(".tsx") || f.endsWith(".ts"))
       );
       found.push(...files);
-    } catch {}
+    } catch (e) {
+      console.log(`[VALIDATE] Error scanning ${dir} for email files: ${e.message}`);
+    }
   }
 
   // Also check for email utility
@@ -947,7 +984,7 @@ function checkSeedFiles(cwd) {
   try {
     const pkg = JSON.parse(readFileSync(join(cwd, "package.json"), "utf-8"));
     hasSeedScript = !!(pkg.scripts?.seed || pkg.scripts?.["db:seed"]);
-  } catch {}
+  } catch { /* no package.json */ }
 
   if (found.length > 0 || hasSeedScript) {
     return { type: "seed-files", ok: true, message: `Seed data found: ${found.join(", ") || "via package.json script"}` };
@@ -986,7 +1023,7 @@ function findFilesRecursive(dir, filterFn, maxDepth = 5, depth = 0) {
         results.push(full);
       }
     }
-  } catch {}
+  } catch { /* permission denied or unreadable dir */ }
   return results;
 }
 
@@ -1004,7 +1041,7 @@ function killProcessTree(pid) {
     } else {
       process.kill(-pid, "SIGKILL");
     }
-  } catch {}
+  } catch { /* process already exited */ }
 }
 
 function sleep(ms) {

@@ -45,6 +45,7 @@
     "watcher.mjs",
     "src/",
     "dashboard/",
+    "examples/",
     "ecosystem.config.cjs"
   ],
   "dependencies": {

@@ -230,11 +230,15 @@
         </div>
         <div class="stat-card">
           <div class="label">Avg Score</div>
-          <div class="value green" id="avgScore">—</div>
+          <div class="value green" id="avgScore">--</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Cost</div>
+          <div class="value purple" id="totalCost">$0.00</div>
         </div>
         <div class="stat-card">
           <div class="label">Uptime</div>
-          <div class="value" id="uptime" style="color: var(--text-secondary)">—</div>
+          <div class="value" id="uptime" style="color: var(--text-secondary)">--</div>
         </div>
         <div class="stat-card">
           <div class="label">Restarts</div>
@@ -279,13 +283,17 @@
   <script>
     // ── State ──────────────────────────────────────────────
     const PORT = location.port || 3111;
+    const params = new URLSearchParams(location.search);
+    const TOKEN = params.get('token') || '';
+    const tokenQuery = TOKEN ? `?token=${TOKEN}` : '';
     const BASE = `http://${location.hostname}:${PORT}`;
-    const WS_URL = `ws://${location.hostname}:${PORT}`;
+    const WS_URL = `ws://${location.hostname}:${PORT}${tokenQuery}`;
     let ws;
     let phases = [];
     let selectedPhaseIdx = -1;
     let orchStatus = "stopped";
-    let orchMode = "—";
+    let orchMode = "--";
+    let totalCost = 0;
 
     // ── WebSocket ─────────────────────────────────────────
     function connect() {
@@ -611,6 +619,13 @@
       }
     }
 
+    // ── HTTP helpers ────────────────────────────────────
+    function authFetch(url, opts = {}) {
+      const headers = opts.headers || {};
+      if (TOKEN) headers['Authorization'] = `Bearer ${TOKEN}`;
+      return fetch(url, { ...opts, headers });
+    }
+
     // ── Health polling ────────────────────────────────────
     async function pollHealth() {
       try {
@@ -618,13 +633,17 @@
         const d = await res.json();
         document.getElementById('uptime').textContent = formatDuration(d.uptime_s);
         setStatus(d.orchestrator_status, d.orchestrator_restarts);
-      } catch {}
+      } catch { /* offline */ }
     }
 
     // Fetch full state periodically to sync phases
     async function pollState() {
       try {
-        const res = await fetch(`${BASE}/state`);
+        const res = await authFetch(`${BASE}/state`);
+        if (res.status === 401) {
+          addLog('Auth required. Add ?token=YOUR_TOKEN to the URL.', 'error');
+          return;
+        }
         const d = await res.json();
         if (d.orchestrator?.phases && d.orchestrator.phases.length > 0) {
           phases = d.orchestrator.phases;
@@ -634,7 +653,12 @@
         }
         if (d.mode) setMode(d.mode);
         if (d.history) renderHistory(d.history);
-      } catch {}
+        // Cost tracking
+        if (d.cost !== undefined && d.cost > 0) {
+          totalCost = d.cost;
+          document.getElementById('totalCost').textContent = `$${totalCost.toFixed(2)}`;
+        }
+      } catch { /* offline */ }
     }
 
     function formatDuration(s) {
@@ -654,13 +678,13 @@
     // ── Controls ─────────────────────────────────────────
     async function restartOrch() {
       if (!confirm('Restart orchestrator?')) return;
-      await fetch(`${BASE}/restart`, { method: 'POST' });
+      await authFetch(`${BASE}/restart`, { method: 'POST' });
       addLog('Manual restart requested', 'orch');
     }
 
     async function stopOrch() {
       if (!confirm('Stop orchestrator?')) return;
-      await fetch(`${BASE}/stop`, { method: 'POST' });
+      await authFetch(`${BASE}/stop`, { method: 'POST' });
       addLog('Manual stop requested', 'error');
     }
 

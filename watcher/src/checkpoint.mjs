@@ -22,7 +22,7 @@ export function saveCheckpoint(state, filePath) {
 
   // Atomic rename (Windows: delete first)
   if (existsSync(filePath)) {
-    try { unlinkSync(filePath); } catch {}
+    try { unlinkSync(filePath); } catch { /* file may not exist or be locked */ }
   }
   renameSync(tmpPath, filePath);
 }

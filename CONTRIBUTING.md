@@ -1,6 +1,6 @@
 # Contributing to Claude Orchestrator
 
-Thanks for your interest in contributing! Here's how to get started.
+Contributions are welcome. This guide covers development setup, code conventions, and the PR process.
 
 ## Development Setup
 
@@ -8,75 +8,186 @@ Thanks for your interest in contributing! Here's how to get started.
 git clone https://github.com/fedevgonzalez/claude-orchestrator.git
 cd claude-orchestrator/watcher
 npm install
-npm test
 ```
 
-**Prerequisites:** Node.js >= 18, Claude Code CLI installed (`claude --version`).
+**Prerequisites:**
+
+- Node.js >= 18
+- Claude Code CLI installed and authenticated (`claude --version`)
+- PM2 installed globally for integration testing (`npm i -g pm2`)
+
+## Running Tests
+
+Tests use Jest with ESM modules. All test files live in `watcher/tests/`.
+
+```bash
+cd watcher
+
+# Run all tests
+node --experimental-vm-modules ./node_modules/jest/bin/jest.js
+
+# Or via npm script
+npm test
+
+# Watch mode
+npm run test:watch
+```
+
+The `--experimental-vm-modules` flag is required because the project uses native ESM (`.mjs` files).
+
+## Code Style
+
+- **ESM modules** -- use `.mjs` file extension with `import`/`export` syntax
+- **No TypeScript** -- plain JavaScript only. Use JSDoc comments for type documentation where it helps readability
+- **Small functions** -- keep functions focused and under ~50 lines where practical
+- **Log prefixes** -- use `[MODULE_NAME]` prefixes in all console output for easy filtering (e.g., `[ORCH]`, `[VALIDATE]`, `[PLUGIN]`)
+- **No build step** -- the project runs directly from source with Node.js
 
 ## Project Structure
 
 ```
 watcher/
-  cli.mjs          # CLI entry point + PM2 daemon management
-  watcher.mjs      # Main supervisor (HTTP/WS server, orchestration loop)
+  cli.mjs              # CLI entry point, subcommand routing, PM2 daemon management
+  watcher.mjs          # Supervisor: HTTP/WS server, auto-restart loop
   src/
-    models.mjs     # Constants, enums, factory functions
-    planner.mjs    # Mode system (8 modes: build, feature, fix, etc.)
-    analyzer.mjs   # Two-phase codebase analyzer (local scan + Claude)
-    orchestrator.mjs # Core orchestration engine
-    claude-cli.mjs # Claude pipe-mode adapter
-    reviewer.mjs   # Code review via Claude
-    validator.mjs  # Phase validators (build, test, lint, etc.)
-    checkpoint.mjs # Atomic checkpoint save/load
-    jsonl.mjs      # JSONL log watcher
-    spec.mjs       # 24-phase build pipeline templates
-    modes/         # Mode implementations (BaseMode subclasses)
+    orchestrator.mjs   # Core execution engine (phase/task loop)
+    analyzer.mjs       # Two-phase codebase analyzer (local scan + Claude call)
+    planner.mjs        # Mode dispatcher -- routes to the correct mode class
+    claude-cli.mjs     # Headless claude -p adapter (subprocess management)
+    reviewer.mjs       # Code review via Claude pipe mode
+    validator.mjs      # Phase validators (build, test, e2e, custom commands)
+    checkpoint.mjs     # Atomic checkpoint save/load for crash recovery
+    rate-limiter.mjs   # Rate limiter for Claude API calls
+    config.mjs         # Project config loader (.orchestrator.config.mjs)
+    plugins.mjs        # Plugin registry (custom validators + lifecycle hooks)
+    history.mjs        # Run history tracking and statistics
+    models.mjs         # Constants, enums, default config, factory functions
+    jsonl.mjs          # JSONL transcript writer
+    spec.mjs           # Spec file parser for build mode (24-phase pipeline)
+    modes/
+      base-mode.mjs    # Abstract base class for all modes
+      build.mjs        # Full project from spec
+      feature.mjs      # Add feature
+      fix.mjs          # Fix bug
+      audit.mjs        # Code audit
+      test.mjs         # Testing
+      review.mjs       # Code review
+      refactor.mjs     # Refactoring
+      exec.mjs         # Generic prompt
+  tests/               # Jest test files
 dashboard/
-  static/          # Real-time dashboard (HTML + WebSocket)
+  static/
+    index.html         # Real-time monitoring dashboard
 ```
 
-## Running Tests
+## How to Add a New Mode
 
-```bash
-cd watcher
-npm test              # Run all tests
-npm run test:watch    # Watch mode
+1. Create `watcher/src/modes/your-mode.mjs` that extends `BaseMode` from `base-mode.mjs`:
+
+```js
+import { BaseMode } from "./base-mode.mjs";
+
+export class YourMode extends BaseMode {
+  constructor(opts) {
+    super(opts);
+    // Mode-specific initialization
+  }
+
+  async buildPlan(analysis) {
+    // Return { phases: [...], specText: "", analysis }
+    // Each phase has: id, name, tasks[], gate
+    // Each task has: id, prompt, dependsOn, validate
+  }
+
+  getConfigOverrides() {
+    // Return config overrides for this mode (e.g., skip validation)
+    return {};
+  }
+
+  // Optional: control review behavior
+  get runTaskReview() { return true; }
+  get runFinalReview() { return true; }
+  get skipPhaseValidation() { return false; }
+}
 ```
 
-Tests use Jest with ESM. All test files live in `watcher/tests/`.
+2. Register the mode in `watcher/src/planner.mjs`:
 
-## Adding a New Mode
+```js
+import { YourMode } from "./modes/your-mode.mjs";
 
-1. Create `watcher/src/modes/your-mode.mjs` extending `BaseMode`
-2. Register it in `watcher/src/planner.mjs` in the `MODE_MAP`
-3. Add to `OrchestratorMode` enum in `watcher/src/models.mjs`
-4. Add tests in `watcher/tests/modes.test.mjs`
+const MODE_CLASSES = {
+  // ... existing modes
+  [OrchestratorMode.YOUR_MODE]: YourMode,
+};
+```
 
-## Adding a Validator
+3. Add the mode constant to `OrchestratorMode` in `watcher/src/models.mjs`:
 
-Validators run after each phase to verify work quality. Edit `watcher/src/validator.mjs`:
+```js
+export const OrchestratorMode = {
+  // ... existing modes
+  YOUR_MODE: "your-mode",
+};
+```
 
-1. Add your validator function to `VALIDATORS`
-2. Map it to phases in `PHASE_VALIDATORS`
+4. Add the mode to the `MODES` array in `watcher/cli.mjs`.
 
-## Code Style
+5. Add tests in `watcher/tests/`.
 
-- ESM modules (`.mjs` extension, `import`/`export`)
-- No TypeScript — plain JavaScript with JSDoc where helpful
-- Keep functions small and focused
-- Log with `[MODULE_NAME]` prefixes for easy filtering
+## How to Write a Plugin
 
-## Pull Requests
+Plugins are loaded from the `plugins` array in the project config file. Each plugin exports a `register` function that receives a `PluginRegistry` instance.
 
-1. Fork and create a feature branch from `master`
-2. Make your changes with tests
-3. Run `npm test` and ensure all tests pass
-4. Open a PR with a clear description of what and why
+```js
+// my-plugin.mjs
+export function register(orch) {
+  // Register a custom validator
+  orch.addValidator("my-check", async (cwd, config) => {
+    // Perform validation
+    return {
+      type: "my-check",
+      ok: true,           // true if validation passed
+      message: "All good",
+      output: "",          // optional: command output for debugging
+    };
+  });
+
+  // Register lifecycle hooks
+  orch.addHook("afterTask", (task, phase) => {
+    console.log(`[MY-PLUGIN] Task ${task.id} scored ${task.reviewScore}`);
+  });
+
+  orch.addHook("beforePhaseValidation", (phase, phaseIdx) => {
+    console.log(`[MY-PLUGIN] About to validate phase ${phase.id}`);
+  });
+}
+```
+
+Register in your project config:
+
+```js
+// .orchestrator.config.mjs
+export default {
+  plugins: ["./my-plugin.mjs"],
+};
+```
+
+Available hook events: `beforeRun`, `afterRun`, `beforePhase`, `afterPhase`, `beforeTask`, `afterTask`, `beforePhaseValidation`, `onValidationFail`, `onReviewComplete`, `onEvent`.
+
+## Pull Request Process
+
+1. Fork the repository and create a feature branch from `master`
+2. Make your changes
+3. Add or update tests as needed
+4. Run the test suite and confirm all tests pass: `npm test`
+5. Open a pull request with a clear description of what changed and why
 
 ## Reporting Issues
 
 Open an issue at https://github.com/fedevgonzalez/claude-orchestrator/issues with:
-- Steps to reproduce
-- Expected vs actual behavior
-- Node.js version and OS
+
+- Steps to reproduce the problem
+- Expected vs. actual behavior
+- Node.js version and operating system
 - Relevant log output (from `claude-orch --logs`)

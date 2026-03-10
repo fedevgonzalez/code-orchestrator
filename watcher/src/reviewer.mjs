@@ -88,7 +88,7 @@ export function callClaudePipe(prompt, cwd, opts = {}) {
       try {
         const parsed = JSON.parse(output);
         output = parsed.result || output;
-      } catch {}
+      } catch { /* not valid JSON, use raw output */ }
     }
 
     return output;

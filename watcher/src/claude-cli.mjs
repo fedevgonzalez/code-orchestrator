@@ -18,7 +18,7 @@ import { existsSync } from "fs";
 export function findClaudeBinary() {
   try {
     return which.sync("claude");
-  } catch {}
+  } catch { /* not on PATH, try manual locations */ }
 
   if (platform() === "win32") {
     const home = homedir();
@@ -105,7 +105,7 @@ export function runClaudePrompt(prompt, cwd, opts = {}) {
     proc.stderr.on("data", (chunk) => {
       errChunks.push(chunk);
       if (onStderr) {
-        try { onStderr(chunk.toString("utf-8")); } catch {}
+        try { onStderr(chunk.toString("utf-8")); } catch { /* stderr callback error, ignore */ }
       }
     });
 
@@ -113,7 +113,7 @@ export function runClaudePrompt(prompt, cwd, opts = {}) {
       proc.kill("SIGTERM");
       // Force kill after 10s grace period
       setTimeout(() => {
-        try { proc.kill("SIGKILL"); } catch {}
+        try { proc.kill("SIGKILL"); } catch { /* already dead */ }
       }, 10_000);
       reject(new Error(`claude -p timed out after ${timeoutMs / 1000}s`));
     }, timeoutMs);

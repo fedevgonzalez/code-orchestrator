@@ -16,7 +16,156 @@ import { callClaudePipe } from "./reviewer.mjs";
 // ── Local codebase scanning (no Claude call) ────────────────────────────
 
 /**
- * Scan package.json for tech stack detection.
+ * Detect the primary ecosystem of the project.
+ * Supports: Node.js, Python, Go, Rust, Java, Ruby, .NET, PHP.
+ */
+function detectEcosystem(cwd) {
+  const markers = [
+    { file: "package.json", ecosystem: "node" },
+    { file: "pyproject.toml", ecosystem: "python" },
+    { file: "requirements.txt", ecosystem: "python" },
+    { file: "setup.py", ecosystem: "python" },
+    { file: "Pipfile", ecosystem: "python" },
+    { file: "go.mod", ecosystem: "go" },
+    { file: "Cargo.toml", ecosystem: "rust" },
+    { file: "pom.xml", ecosystem: "java" },
+    { file: "build.gradle", ecosystem: "java" },
+    { file: "build.gradle.kts", ecosystem: "java" },
+    { file: "Gemfile", ecosystem: "ruby" },
+    { file: "composer.json", ecosystem: "php" },
+    { file: "*.csproj", ecosystem: "dotnet" },
+    { file: "*.sln", ecosystem: "dotnet" },
+  ];
+
+  const detected = [];
+  for (const m of markers) {
+    if (m.file.includes("*")) {
+      // Glob-like check (just check if any matching file exists in root)
+      try {
+        const files = readdirSync(cwd);
+        const ext = m.file.replace("*", "");
+        if (files.some(f => f.endsWith(ext))) detected.push(m.ecosystem);
+      } catch { /* ignore */ }
+    } else if (existsSync(join(cwd, m.file))) {
+      detected.push(m.ecosystem);
+    }
+  }
+
+  // Deduplicate
+  return [...new Set(detected)];
+}
+
+/**
+ * Detect project info for non-Node ecosystems.
+ */
+function detectNonNodeProject(cwd, ecosystem) {
+  const info = {
+    name: basename(cwd),
+    ecosystem,
+    language: ecosystem,
+    framework: "unknown",
+    buildCommand: null,
+    testCommand: null,
+    packageManager: null,
+  };
+
+  try {
+    switch (ecosystem) {
+      case "python": {
+        if (existsSync(join(cwd, "pyproject.toml"))) {
+          const toml = readFileSync(join(cwd, "pyproject.toml"), "utf-8");
+          if (toml.includes("django")) info.framework = "django";
+          else if (toml.includes("fastapi")) info.framework = "fastapi";
+          else if (toml.includes("flask")) info.framework = "flask";
+          info.packageManager = toml.includes("[tool.poetry]") ? "poetry" : "pip";
+        }
+        info.buildCommand = "python -m pytest --co -q"; // collect-only as build check
+        info.testCommand = "python -m pytest";
+        break;
+      }
+      case "go": {
+        if (existsSync(join(cwd, "go.mod"))) {
+          const mod = readFileSync(join(cwd, "go.mod"), "utf-8");
+          const modMatch = mod.match(/module\s+(\S+)/);
+          if (modMatch) info.name = modMatch[1].split("/").pop();
+          if (mod.includes("gin-gonic")) info.framework = "gin";
+          else if (mod.includes("labstack/echo")) info.framework = "echo";
+          else if (mod.includes("gofiber")) info.framework = "fiber";
+        }
+        info.buildCommand = "go build ./...";
+        info.testCommand = "go test ./...";
+        info.packageManager = "go mod";
+        break;
+      }
+      case "rust": {
+        if (existsSync(join(cwd, "Cargo.toml"))) {
+          const cargo = readFileSync(join(cwd, "Cargo.toml"), "utf-8");
+          const nameMatch = cargo.match(/name\s*=\s*"([^"]+)"/);
+          if (nameMatch) info.name = nameMatch[1];
+          if (cargo.includes("actix-web")) info.framework = "actix";
+          else if (cargo.includes("axum")) info.framework = "axum";
+          else if (cargo.includes("rocket")) info.framework = "rocket";
+        }
+        info.buildCommand = "cargo build";
+        info.testCommand = "cargo test";
+        info.packageManager = "cargo";
+        break;
+      }
+      case "java": {
+        if (existsSync(join(cwd, "pom.xml"))) {
+          const pom = readFileSync(join(cwd, "pom.xml"), "utf-8");
+          if (pom.includes("spring-boot")) info.framework = "spring-boot";
+          info.buildCommand = "mvn compile";
+          info.testCommand = "mvn test";
+          info.packageManager = "maven";
+        } else if (existsSync(join(cwd, "build.gradle")) || existsSync(join(cwd, "build.gradle.kts"))) {
+          info.framework = "gradle";
+          info.buildCommand = "./gradlew build";
+          info.testCommand = "./gradlew test";
+          info.packageManager = "gradle";
+        }
+        break;
+      }
+      case "ruby": {
+        if (existsSync(join(cwd, "Gemfile"))) {
+          const gemfile = readFileSync(join(cwd, "Gemfile"), "utf-8");
+          if (gemfile.includes("rails")) info.framework = "rails";
+          else if (gemfile.includes("sinatra")) info.framework = "sinatra";
+        }
+        info.buildCommand = "bundle exec rake";
+        info.testCommand = "bundle exec rspec";
+        info.packageManager = "bundler";
+        break;
+      }
+      case "php": {
+        if (existsSync(join(cwd, "composer.json"))) {
+          const composer = JSON.parse(readFileSync(join(cwd, "composer.json"), "utf-8"));
+          const deps = { ...composer.require, ...composer["require-dev"] };
+          if (deps["laravel/framework"]) info.framework = "laravel";
+          else if (deps["symfony/framework-bundle"]) info.framework = "symfony";
+        }
+        info.buildCommand = "composer install --no-dev";
+        info.testCommand = "vendor/bin/phpunit";
+        info.packageManager = "composer";
+        break;
+      }
+      case "dotnet": {
+        info.framework = "dotnet";
+        info.buildCommand = "dotnet build";
+        info.testCommand = "dotnet test";
+        info.packageManager = "nuget";
+        break;
+      }
+    }
+  } catch (e) {
+    console.log(`[ANALYZER] Error detecting ${ecosystem} project: ${e.message}`);
+  }
+
+  return info;
+}
+
+/**
+ * Scan package.json for tech stack detection (Node.js projects).
  */
 function detectFromPackageJson(cwd) {
   const pkgPath = join(cwd, "package.json");
@@ -28,6 +177,7 @@ function detectFromPackageJson(cwd) {
 
     return {
       name: pkg.name || basename(cwd),
+      ecosystem: "node",
       framework: deps["next"] ? "next.js" : deps["react"] ? "react" : deps["vue"] ? "vue" : deps["express"] ? "express" : "unknown",
       language: deps["typescript"] ? "typescript" : "javascript",
       styling: deps["tailwindcss"] ? "tailwind" : deps["styled-components"] ? "styled-components" : deps["@emotion/react"] ? "emotion" : "css",
@@ -96,6 +246,13 @@ function detectConfigs(cwd) {
     ["docker-compose.yml", "docker-compose.yaml", "Dockerfile"],
     [".github/workflows"],
     ["CLAUDE.md", ".claude/settings.json"],
+    // Multi-language configs
+    ["pyproject.toml", "setup.py", "requirements.txt"],
+    ["go.mod"],
+    ["Cargo.toml"],
+    ["pom.xml", "build.gradle", "build.gradle.kts"],
+    ["Gemfile"],
+    ["composer.json"],
   ];
 
   for (const group of checks) {
@@ -138,23 +295,38 @@ function findRelevantFiles(cwd, keywords, maxFiles = 20) {
  * @param {string} mode - Orchestrator mode (feature, fix, audit, etc.)
  * @returns {object} Analysis result
  */
+// Export for testing
+export { detectEcosystem, detectNonNodeProject, detectFromPackageJson };
+
 export async function analyze(cwd, userPrompt, mode) {
   console.log(`[ANALYZER] Scanning codebase at ${cwd}...`);
 
-  // Phase 1: Local scan
+  // Phase 1: Local scan — detect ecosystems (Node, Python, Go, Rust, etc.)
+  const ecosystems = detectEcosystem(cwd);
   const pkg = detectFromPackageJson(cwd);
+
+  // For non-Node ecosystems, detect project info
+  const nonNodeProjects = ecosystems
+    .filter(e => e !== "node")
+    .map(e => detectNonNodeProject(cwd, e));
+
   const structure = scanStructure(cwd, 3);
   const configs = detectConfigs(cwd);
 
   const codebase = {
-    exists: pkg !== null,
+    exists: pkg !== null || ecosystems.length > 0,
+    ecosystems,
     package: pkg,
+    nonNodeProjects,
     configs,
     structure: structure.slice(0, 100), // Cap for prompt size
     structureSummary: summarizeStructure(structure),
   };
 
-  console.log(`[ANALYZER] Detected: ${pkg?.framework || "no framework"}, ${pkg?.language || "unknown lang"}, ${pkg?.orm || "no orm"}`);
+  const primaryEco = pkg?.framework || nonNodeProjects[0]?.framework || "no framework";
+  const primaryLang = pkg?.language || ecosystems[0] || "unknown";
+  console.log(`[ANALYZER] Ecosystems: ${ecosystems.join(", ") || "none detected"}`);
+  console.log(`[ANALYZER] Detected: ${primaryEco}, ${primaryLang}, ${pkg?.orm || "no orm"}`);
   console.log(`[ANALYZER] Files: ${structure.filter(e => e.type === "file").length}, Dirs: ${structure.filter(e => e.type === "dir").length}`);
 
   // Phase 2: Claude analysis (interpret request + suggest plan)
@@ -191,11 +363,15 @@ function summarizeStructure(structure) {
 function analyzeWithClaude(cwd, userPrompt, mode, codebase) {
   const topDirs = codebase.structureSummary.topDirs.slice(0, 15).join(", ");
   const pkg = codebase.package;
+  const nonNode = codebase.nonNodeProjects || [];
+  const ecoSummary = nonNode.length > 0
+    ? nonNode.map(p => `${p.ecosystem}/${p.framework}`).join(", ")
+    : "";
 
-  const prompt = `You are a senior architect. Plan this ${mode.toUpperCase()} task on an existing ${pkg?.framework || "unknown"} (${pkg?.language || "js"}) project.
+  const prompt = `You are a senior architect. Plan this ${mode.toUpperCase()} task on an existing ${pkg?.framework || nonNode[0]?.framework || "unknown"} (${pkg?.language || nonNode[0]?.language || "unknown"}) project.
 
 REQUEST: "${userPrompt}"
-PROJECT: ${pkg?.name || basename(cwd)} | ORM: ${pkg?.orm || "none"} | Auth: ${pkg?.auth || "none"} | Style: ${pkg?.styling || "css"} | Test: ${pkg?.testing || "none"} | PM: ${pkg?.packageManager || "npm"}
+PROJECT: ${pkg?.name || nonNode[0]?.name || basename(cwd)} | ORM: ${pkg?.orm || "none"} | Auth: ${pkg?.auth || "none"} | Style: ${pkg?.styling || "css"} | Test: ${pkg?.testing || "none"} | PM: ${pkg?.packageManager || nonNode[0]?.packageManager || "npm"}${ecoSummary ? `\nECOSYSTEMS: ${codebase.ecosystems.join(", ")} (${ecoSummary})` : ""}
 DIRS: ${topDirs}
 
 RULES:

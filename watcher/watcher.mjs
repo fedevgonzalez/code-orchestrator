@@ -42,6 +42,7 @@ const { values: args } = parseArgs({
     fix: { type: "boolean", default: false },
     resume: { type: "boolean", default: false },
     "no-review": { type: "boolean", default: false },
+    "dry-run": { type: "boolean", default: false },
     "max-restarts": { type: "string", default: "50" },
   },
 });
@@ -51,6 +52,7 @@ const PORT = parseInt(args.port, 10);
 const DEV_PORT = parseInt(args["dev-port"], 10) || 3000;
 const VERBOSE = args.verbose;
 const MAX_RESTARTS = parseInt(args["max-restarts"], 10);
+const DASHBOARD_TOKEN = process.env.ORCHESTRATOR_TOKEN || null;
 
 // ── Persistent logging ────────────────────────────────────────────────────
 
@@ -66,7 +68,7 @@ function logToFile(message) {
   const timestamp = new Date().toISOString();
   try {
     appendFileSync(join(LOG_DIR, "supervisor.log"), `[${timestamp}] ${message}\n`);
-  } catch {}
+  } catch { /* log file write failed, can't recurse into console */ }
 }
 
 // Wrap console to also log to file (for PM2 daemon mode)
@@ -117,16 +119,33 @@ function broadcast(event) {
 
 // ── HTTP server ───────────────────────────────────────────────────────────
 
+function checkAuth(req) {
+  if (!DASHBOARD_TOKEN) return true; // No token configured = open access
+  const url = new URL(req.url, `http://localhost:${PORT}`);
+  const queryToken = url.searchParams.get("token");
+  if (queryToken === DASHBOARD_TOKEN) return true;
+  const authHeader = req.headers.authorization || "";
+  if (authHeader === `Bearer ${DASHBOARD_TOKEN}`) return true;
+  return false;
+}
+
 const httpServer = createServer((req, res) => {
   const headers = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
   };
 
   if (req.method === "OPTIONS") {
     res.writeHead(200, headers);
     res.end();
+    return;
+  }
+
+  // Auth check (skip for health endpoint)
+  if (!req.url.startsWith("/health") && !checkAuth(req)) {
+    res.writeHead(401, { ...headers, "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Unauthorized. Provide token via ?token=<token> or Authorization: Bearer <token>" }));
     return;
   }
 
@@ -167,6 +186,8 @@ const httpServer = createServer((req, res) => {
       history: history.slice(-20),
       historyStats: getHistoryStats(history),
       plugins: pluginRegistry.loadedPlugins.length,
+      cost: currentOrchestrator?.totalCostUsd || 0,
+      rateLimiter: currentOrchestrator?._rateLimiter?.getStatus() || null,
     }));
     return;
   }
@@ -202,7 +223,16 @@ const httpServer = createServer((req, res) => {
 
 const wss = new WebSocketServer({ server: httpServer });
 
-wss.on("connection", (ws) => {
+wss.on("connection", (ws, req) => {
+  // Auth check for WebSocket
+  if (DASHBOARD_TOKEN) {
+    const url = new URL(req.url, `http://localhost:${PORT}`);
+    const token = url.searchParams.get("token");
+    if (token !== DASHBOARD_TOKEN) {
+      ws.close(4001, "Unauthorized");
+      return;
+    }
+  }
   clients.add(ws);
   console.log(`[WS] Client connected (${clients.size} total)`);
 
@@ -281,6 +311,7 @@ function startOrchestrator(forceResume = false) {
     },
     resume: isResume,
     noReview: args["no-review"],
+    dryRun: args["dry-run"],
     verbose: VERBOSE,
     config: { devServerPort: DEV_PORT, ...projectConfig },
     pluginRegistry,
@@ -409,6 +440,8 @@ console.log(`  Dev server:   port ${DEV_PORT}`);
 console.log(`  Max restarts: ${MAX_RESTARTS}`);
 console.log(`  Review:       ${args["no-review"] ? "DISABLED" : "ENABLED"}`);
 console.log(`  Permissions:  ${projectConfig.allowUnsafePermissions === false ? "SAFE (Claude will ask)" : "AUTO (--dangerously-skip-permissions)"}`);
+console.log(`  Auth:         ${DASHBOARD_TOKEN ? "ENABLED (ORCHESTRATOR_TOKEN)" : "OPEN (set ORCHESTRATOR_TOKEN to secure)"}`);
+if (args["dry-run"]) console.log(`  Dry run:      YES (plan only, no execution)`);
 console.log("");
 
 httpServer.listen(PORT, async () => {

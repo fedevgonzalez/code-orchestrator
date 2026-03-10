@@ -235,7 +235,7 @@ export class JSONLWatcher {
             });
           }
         }
-      } catch {}
+      } catch { /* malformed JSONL line, skip */ }
     }
 
     return events;

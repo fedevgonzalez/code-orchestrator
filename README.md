@@ -1,39 +1,40 @@
 # Claude Orchestrator
 
-**Autonomous multi-mode developer tool powered by Claude Code.**
-
-Build entire projects from a spec, add features, fix bugs, run audits, generate tests, review code, refactor — all autonomously with automatic code review, validation, and crash recovery.
+Autonomous multi-phase development tool that orchestrates Claude Code CLI (`claude -p`) to execute complex tasks from start to finish.
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js 18+](https://img.shields.io/badge/node-18%2B-green.svg)](https://nodejs.org)
 
 ---
 
-## What it does
+## Key Features
 
-Claude Orchestrator drives [Claude Code](https://docs.anthropic.com/en/docs/claude-code) through phased execution plans. Give it a task — from a full project spec to a vague bug report — and it will:
+- **8 execution modes** -- build, feature, fix, audit, test, review, refactor, exec
+- **Automatic code review** -- every task is reviewed and scored (1-10), auto-fixed if below threshold
+- **Crash recovery** -- checkpoint after every task, auto-restart with exponential backoff
+- **Multi-language support** -- Node.js, Python, Go, Rust, Java, Ruby, PHP, .NET
+- **Parallel task execution** -- independent tasks can run concurrently when configured
+- **Real-time dashboard** -- WebSocket-powered monitoring UI with live phase/task progress
+- **Plugin system** -- custom validators and lifecycle hooks via project config
+- **Dry-run mode** -- preview the generated plan without executing anything
 
-1. **Analyze** your codebase and request (framework, ORM, auth, styling, structure)
-2. **Plan** a multi-phase execution strategy with detailed tasks
-3. **Execute** each task via headless `claude -p` with session continuity
-4. **Validate** output (build checks, file existence, custom commands)
-5. **Review** code quality (score 1-10, auto-fix if rejected)
-6. **Recover** from crashes (checkpoint after every task, auto-restart with backoff)
+## How It Works
 
-## Modes
+For each run, the orchestrator follows this pipeline:
 
-| Mode | Command | Description |
-|------|---------|-------------|
-| **build** | `claude-orch build spec.md` | Full project from spec (24 phases, 0→100) |
-| **feature** | `claude-orch feature "add dark mode"` | Add a feature to existing project |
-| **fix** | `claude-orch fix "login is broken"` | Diagnose and fix a bug |
-| **audit** | `claude-orch audit --type security` | Code audit (security, perf, quality, a11y) |
-| **test** | `claude-orch test --fix` | Run/generate tests, fix failures |
-| **review** | `claude-orch review` | Comprehensive code review with report |
-| **refactor** | `claude-orch refactor "extract auth"` | Code refactoring with regression checks |
-| **exec** | `claude-orch exec "update all deps"` | Generic prompt (catch-all) |
+```
+Analyze --> Plan --> Execute --> Review --> Validate
+```
 
-## Quick start
+1. **Analyze** -- scans your codebase (framework, ORM, auth, styling, structure) and interprets the request
+2. **Plan** -- generates a multi-phase execution plan with ordered tasks and dependencies
+3. **Execute** -- runs each task via headless `claude -p` with session continuity (`--resume`)
+4. **Review** -- self-reviews each task output (score 1-10), auto-fixes if score < 7
+5. **Validate** -- runs build checks, test suites, file existence checks, and custom commands per phase
+
+Crash recovery saves a checkpoint after every task. On failure, the supervisor auto-restarts from the exact point of interruption with exponential backoff (5s to 60s). The restart counter resets whenever a phase completes successfully.
+
+## Quick Start
 
 ### Prerequisites
 
@@ -47,166 +48,318 @@ Claude Orchestrator drives [Claude Code](https://docs.anthropic.com/en/docs/clau
 npm install -g claude-orchestrator
 ```
 
-Or run directly:
+Or run directly with npx:
 
 ```bash
-npx claude-orchestrator feature "add Stripe billing" --cwd /path/to/project
+npx claude-orchestrator feature "add dark mode" --cwd /path/to/project
 ```
 
-### Usage
+### Usage by Mode
+
+**Build** -- create a full project from a spec file (24 phases, from scaffolding to deployment):
 
 ```bash
-# Build a full project from a spec file
 claude-orch build spec.md
+```
 
-# Add a feature (analyzes your codebase first)
-claude-orch feature "add user notifications with email and in-app" --cwd .
+**Feature** -- add a feature to an existing project:
 
-# Fix a bug (even vague descriptions work)
-claude-orch fix "the login page looks ugly" --cwd .
+```bash
+claude-orch feature "add Stripe billing with free/pro tiers" --cwd .
+```
 
-# Security audit
+**Fix** -- diagnose and fix a bug (even vague descriptions work):
+
+```bash
+claude-orch fix "users can't reset their password" --cwd .
+```
+
+**Audit** -- run a code audit (security, performance, quality, accessibility):
+
+```bash
 claude-orch audit --type security --cwd .
+claude-orch audit --fix --cwd .          # audit + auto-fix
+```
 
-# Generate and run tests
+**Test** -- run tests, generate missing tests, fix failures:
+
+```bash
 claude-orch test --fix --cwd .
+```
 
-# Full code review
+**Review** -- comprehensive code review with detailed report:
+
+```bash
 claude-orch review --cwd .
+```
 
-# Refactor with regression checks
-claude-orch refactor "migrate to App Router" --cwd .
+**Refactor** -- refactor code with regression checks:
 
-# Any prompt
+```bash
+claude-orch refactor "extract auth into a standalone service" --cwd .
+```
+
+**Exec** -- generic prompt (catch-all for anything else):
+
+```bash
 claude-orch exec "update all dependencies and fix breaking changes" --cwd .
 ```
 
-### Monitor
+### Dry Run
+
+Preview the execution plan without running any tasks:
 
 ```bash
-claude-orch --status              # All running instances
-claude-orch --logs myproject      # View live progress
-claude-orch --stop myproject      # Stop an instance
-claude-orch --resume /path/to    # Resume from crash checkpoint
+claude-orch feature "add notifications" --cwd . --dry-run
 ```
 
-Each instance also exposes a real-time **dashboard** at `http://localhost:<port>` with WebSocket updates.
+### Monitor Running Instances
 
-## How it works
-
+```bash
+claude-orch --status              # list all running instances
+claude-orch --logs myproject      # view live progress
+claude-orch --stop myproject      # stop an instance
+claude-orch --stop-all            # stop everything
+claude-orch --restart myproject   # restart an instance
+claude-orch --resume /path/to    # resume from checkpoint
 ```
-cli.mjs (subcommand routing)
-└── watcher.mjs (supervisor)
-    ├── HTTP + WebSocket server (dashboard + API)
-    ├── Auto-restart with exponential backoff (5s → 60s)
-    └── Orchestrator engine
-        ├── Analyzer: scan codebase + interpret request → plan
-        ├── Mode system: 8 specialized modes control plan generation
-        ├── For each phase:
-        │   ├── Execute tasks via claude -p --resume <sessionId>
-        │   ├── Validate output (build, files, custom commands)
-        │   ├── Review code (score 1-10, auto-fix if < 7)
-        │   └── Checkpoint after every task
-        ├── Phase-level validation (build, test, e2e)
-        └── Final comprehensive review
-```
-
-### Smart Analyzer
-
-For non-build modes, the analyzer runs before any code is written:
-
-1. **Local scan** (no Claude call): detects framework, language, ORM, auth, styling, test framework, package manager
-2. **Claude analysis** (1 call): interprets the request and produces a phased plan with success criteria
-
-Even vague prompts like *"the login page looks ugly"* become detailed multi-phase plans:
-- Phase 1: Diagnose current auth layout and identify issues
-- Phase 2: Redesign with branded components and CSS
-- Phase 3: Validate build passes after changes
-
-### Session Continuity
-
-All tasks within a run share a single Claude session via `--resume <sessionId>`. This means Claude retains full context of previous work — no redundant file reads or lost context between tasks.
-
-### Crash Recovery
-
-After every task, the orchestrator saves a checkpoint with:
-- Current phase and task index
-- All phase/task statuses
-- Mode, prompt, and flags
-- Claude session ID
-
-On crash, auto-restart resumes from the exact task with the same session. The restart counter resets on each completed phase (real progress = not a crash loop).
 
 ## Configuration
 
-### CLI Options
+### Project Config File
+
+Create `.orchestrator.config.mjs` (or `.orchestrator.config.js`) in your project root to customize behavior:
+
+```js
+export default {
+  // Build and dev commands
+  buildCommand: "pnpm run build",
+  devCommand: "pnpm run dev",
+  testCommand: "pnpm test",
+  devServerPort: 5173,
+
+  // Timeouts
+  turnTimeout: 15 * 60_000,       // 15 min per task
+  phaseTimeout: 2 * 3600_000,     // 2h per phase
+  totalTimeout: 24 * 3600_000,    // 24h max run
+
+  // Review thresholds
+  minTaskScore: 7,                // minimum score to pass review
+  maxReviewCycles: 2,             // max review iterations per task
+
+  // Rate limiting / parallelism
+  maxConcurrentClaude: 1,         // set > 1 for parallel task execution
+  claudeMinDelayMs: 1000,         // minimum delay between Claude calls
+
+  // Permissions
+  allowUnsafePermissions: true,   // false = Claude will prompt for permission
+
+  // Plugins
+  plugins: ["./my-validator.mjs"],
+};
+```
+
+Config files are searched in this order: `.orchestrator.config.mjs`, `.orchestrator.config.js`, `.orchestrator.config.cjs`, `orchestrator.config.mjs`, `orchestrator.config.js`.
+
+### CLI Reference
+
+**Subcommands:**
+
+| Command | Description |
+|---------|-------------|
+| `build <spec.md>` | Build a full project from a markdown spec |
+| `feature "<description>"` | Add a feature to an existing project |
+| `fix "<description>"` | Diagnose and fix a bug |
+| `audit` | Run a code audit |
+| `test` | Run and generate tests |
+| `review` | Full code review |
+| `refactor "<description>"` | Refactor code |
+| `exec "<prompt>"` | Execute any prompt |
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--cwd <dir>` | Project directory (default: current directory) |
+| `--dry-run` | Generate the plan without executing tasks |
+| `--no-review` | Skip the code review step after each task |
+| `--fix` | Auto-fix issues found during audit or test modes |
+| `--type <type>` | Audit type: `security`, `performance`, `quality`, `a11y`, `full` |
+| `--dev-port <port>` | Dev server port for validation (default: auto-assigned) |
+| `--port <port>` | Dashboard HTTP port (default: auto-assigned from 3111) |
+| `--max-restarts <n>` | Maximum auto-restart attempts (default: 50) |
+| `--verbose` | Enable verbose logging |
+
+**Management flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--status` | Show all running orchestrator instances |
+| `--logs [name]` | View logs for an instance |
+| `--stop [name]` | Stop an instance |
+| `--stop-all` | Stop all instances |
+| `--restart [name]` | Restart an instance |
+| `--resume <project-dir>` | Resume from a saved checkpoint |
+
+## Dashboard
+
+Each orchestrator instance serves a real-time monitoring dashboard over HTTP. The default port is auto-assigned starting from 3111.
 
 ```
---cwd <dir>          Project directory (default: current)
---dev-port <port>    Dev server port for validation
---port <port>        Dashboard port
---type <type>        Audit type: security, performance, quality, a11y, full
---fix                Auto-fix issues (audit/test modes)
---no-review          Skip code review step
---max-restarts <n>   Max auto-restarts (default: 50)
---verbose            Verbose logging
+http://localhost:3111
 ```
+
+<!-- TODO: Add dashboard screenshot -->
+
+The dashboard shows live phase/task progress, log output, and review scores via WebSocket.
+
+### Dashboard Authentication
+
+Set the `ORCHESTRATOR_TOKEN` environment variable to require authentication:
+
+```bash
+export ORCHESTRATOR_TOKEN=my-secret-token
+```
+
+When set, all dashboard and API requests must include the token:
+
+- Query parameter: `?token=my-secret-token`
+- Header: `Authorization: Bearer my-secret-token`
+- WebSocket: `ws://localhost:3111?token=my-secret-token`
+
+The `/health` endpoint is always accessible without authentication.
 
 ### HTTP API
 
-Each instance exposes these endpoints:
-
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/health` | GET | Instance health + uptime |
-| `/state` | GET | Full orchestrator state |
+| `/` | GET | Dashboard HTML |
+| `/health` | GET | Instance health and uptime (no auth required) |
+| `/state` | GET | Full orchestrator state, phases, history |
 | `/logs` | GET | Last 200 log entries |
-| `/restart` | POST | Restart orchestrator |
-| `/stop` | POST | Stop orchestrator |
+| `/restart` | POST | Restart the orchestrator |
+| `/stop` | POST | Stop the orchestrator |
 
 ### WebSocket Events
 
 Connect to `ws://localhost:<port>` for real-time events:
 
-- `plan_ready` — Execution plan generated
-- `phase_start` / `phase_done` — Phase lifecycle
-- `task_start` / `task_done` — Task lifecycle with scores
-- `task_reviewed` — Code review results
-- `run_complete` — Final status with task counts
-- `error` — Error details
+- `initial_state` -- sent on connection with current state
+- `plan_ready` -- execution plan generated
+- `phase_start` / `phase_done` -- phase lifecycle
+- `task_start` / `task_done` -- task lifecycle with review scores
+- `task_reviewed` -- code review results (score, approved, issues)
+- `state_update` -- full state sync on key events
+- `orchestrator_restarting` / `orchestrator_completed` -- supervisor events
+- `run_complete` -- final status with task counts and elapsed time
+- `error` -- error details
 
-## Architecture
+## Plugin System
+
+Plugins add custom validators and lifecycle hooks. Create a plugin file that exports a `register` function:
+
+```js
+// my-validator.mjs
+export function register(orch) {
+  // Add a custom validator (runs during phase validation)
+  orch.addValidator("my-check", async (cwd, config) => {
+    // Run your checks here
+    return { type: "my-check", ok: true, message: "All checks passed" };
+  });
+
+  // Add a lifecycle hook
+  orch.addHook("afterTask", (task, phase) => {
+    console.log(`Task ${task.id} completed with score ${task.reviewScore}`);
+  });
+}
+```
+
+Register plugins in your project config:
+
+```js
+// .orchestrator.config.mjs
+export default {
+  plugins: ["./my-validator.mjs"],
+};
+```
+
+### Available Hook Events
+
+| Hook | Arguments | Description |
+|------|-----------|-------------|
+| `beforeRun` | `(orchestrator)` | Before orchestration starts |
+| `afterRun` | `(orchestrator, status)` | After orchestration ends |
+| `beforePhase` | `(phase, phaseIdx)` | Before a phase starts |
+| `afterPhase` | `(phase, phaseIdx)` | After a phase completes |
+| `beforeTask` | `(task, phase)` | Before a task starts |
+| `afterTask` | `(task, phase)` | After a task completes |
+| `beforePhaseValidation` | `(phase, phaseIdx)` | Before phase validation runs |
+| `onValidationFail` | `(result, phase)` | When a validation check fails |
+| `onReviewComplete` | `(task, review)` | When a task review finishes |
+| `onEvent` | `(event)` | All orchestrator events |
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `ORCHESTRATOR_TOKEN` | Dashboard and API authentication token. When set, all requests (except `/health`) require this token. |
+
+## Multi-Language Support
+
+The analyzer automatically detects your project's ecosystem and adjusts build/test/dev commands accordingly. Supported ecosystems:
+
+| Ecosystem | Detection | Default Build | Default Test |
+|-----------|-----------|---------------|--------------|
+| **Node.js** | `package.json` | `npm run build` | `npm test` |
+| **Python** | `pyproject.toml`, `requirements.txt`, `setup.py`, `Pipfile` | varies | `pytest` |
+| **Go** | `go.mod` | `go build ./...` | `go test ./...` |
+| **Rust** | `Cargo.toml` | `cargo build` | `cargo test` |
+| **Java** | `pom.xml`, `build.gradle`, `build.gradle.kts` | `mvn package` / `gradle build` | `mvn test` / `gradle test` |
+| **Ruby** | `Gemfile` | `bundle exec rake` | `bundle exec rspec` |
+| **PHP** | `composer.json` | `composer install` | `vendor/bin/phpunit` |
+| **.NET** | `*.csproj`, `*.sln` | `dotnet build` | `dotnet test` |
+
+Override any detected command in your `.orchestrator.config.mjs`.
+
+## Architecture Overview
 
 ```
 claude-orchestrator/
 ├── watcher/
-│   ├── cli.mjs               # Multi-command CLI entry point
-│   ├── watcher.mjs            # Supervisor: HTTP + WS + auto-restart
+│   ├── cli.mjs                  # CLI entry point, subcommand routing, PM2 daemon management
+│   ├── watcher.mjs              # Supervisor: HTTP/WS server, auto-restart, lifecycle
+│   ├── package.json
 │   └── src/
-│       ├── orchestrator.mjs   # Multi-mode execution engine
-│       ├── analyzer.mjs       # Codebase + request analyzer
-│       ├── planner.mjs        # Mode dispatcher
-│       ├── claude-cli.mjs     # Headless claude -p adapter
-│       ├── reviewer.mjs       # Code review via pipe mode
-│       ├── validator.mjs      # Build, test, e2e validation
-│       ├── spec.mjs           # Spec → 24-phase plan (build mode)
-│       ├── checkpoint.mjs     # Crash recovery persistence
-│       ├── models.mjs         # Constants + type definitions
-│       ├── jsonl.mjs          # JSONL transcript monitoring
+│       ├── orchestrator.mjs     # Core execution engine (phase/task loop)
+│       ├── analyzer.mjs         # Two-phase codebase analyzer (local scan + Claude)
+│       ├── planner.mjs          # Mode dispatcher
+│       ├── claude-cli.mjs       # Headless claude -p adapter
+│       ├── reviewer.mjs         # Code review via Claude pipe mode
+│       ├── validator.mjs        # Build, test, e2e, custom validation
+│       ├── spec.mjs             # Spec-to-plan converter (24-phase build pipeline)
+│       ├── checkpoint.mjs       # Atomic checkpoint save/load for crash recovery
+│       ├── rate-limiter.mjs     # Rate limiter for Claude API calls
+│       ├── config.mjs           # Project config loader and merger
+│       ├── plugins.mjs          # Plugin registry (validators + hooks)
+│       ├── history.mjs          # Run history tracking and stats
+│       ├── models.mjs           # Constants, enums, factory functions
+│       ├── jsonl.mjs            # JSONL transcript writer
 │       └── modes/
-│           ├── base-mode.mjs  # Abstract base class
-│           ├── build.mjs      # Full project from spec
-│           ├── feature.mjs    # Add feature
-│           ├── fix.mjs        # Fix bug
-│           ├── audit.mjs      # Code audit
-│           ├── test.mjs       # Testing
-│           ├── review.mjs     # Code review
-│           ├── refactor.mjs   # Refactoring
-│           └── exec.mjs       # Generic prompt
+│           ├── base-mode.mjs    # Abstract base class for all modes
+│           ├── build.mjs        # Full project from spec (24 phases)
+│           ├── feature.mjs      # Add feature
+│           ├── fix.mjs          # Fix bug
+│           ├── audit.mjs        # Code audit
+│           ├── test.mjs         # Testing
+│           ├── review.mjs       # Code review
+│           ├── refactor.mjs     # Refactoring
+│           └── exec.mjs         # Generic prompt
 ├── dashboard/
 │   └── static/
-│       └── index.html         # Real-time monitoring dashboard
-├── spec.example.md            # Example spec file
+│       └── index.html           # Real-time monitoring dashboard
+├── spec.example.md              # Example spec file for build mode
+├── CONTRIBUTING.md
+├── CHANGELOG.md
 ├── LICENSE
 └── README.md
 ```
@@ -222,7 +375,7 @@ For `build` mode, create a markdown spec describing your project:
 A project management tool for small teams.
 
 ## Tech Stack
-- Framework: Next.js with NextSpark
+- Framework: Next.js 14 with App Router
 - Database: PostgreSQL with Drizzle ORM
 - Auth: Better Auth with Google OAuth
 - Payments: Stripe
@@ -242,58 +395,17 @@ A project management tool for small teams.
 
 See [spec.example.md](spec.example.md) for a complete example.
 
-## Mode Details
-
-### Build Mode (0→100)
-
-Runs 24 predefined phases from scaffolding to launch assets:
-
-Scaffold → Database → Auth → Core API → Payments → Frontend → Onboarding → Integration → UX Polish → Seed Data → Landing Page → SEO → Legal → Email → Analytics → Security → Support → Testing → Screenshots → Performance → CI/CD → Deploy → Launch Assets
-
-### Feature / Fix / Refactor
-
-The analyzer scans your codebase and creates a context-aware plan:
-
-```
-$ claude-orch feature "add appointment scheduling with calendar" --cwd .
-
-[ANALYZER] Detected: next.js, typescript, drizzle
-[ANALYZER] Analyzing request with Claude (mode: feature)...
-
-Plan: 5 phases, 13 tasks
-  P1: API & Service Layer for Scheduling (3 tasks)
-  P2: Calendar Components (2 tasks)
-  P3: Time Slot & Confirmation UI (4 tasks)
-  P4: Page Integration & Navigation (2 tasks)
-  P5: Tests (2 tasks)
-```
-
-### Audit / Review
-
-Read-only analysis modes that skip build validation:
-
-- **Audit**: Scans for security vulnerabilities, performance issues, code quality problems
-- **Review**: Comprehensive architecture, code quality, and security review
-
-Both generate detailed reports without modifying your code (unless `--fix` is used with audit).
-
 ## Platform Notes
 
-- **Windows**: Claude CLI at `~/.claude/local/claude.exe` or on PATH
-- **Linux/Mac**: Claude CLI on PATH
-- Requires Node.js 18+ and PM2 for background execution
-- Each `claude -p` invocation is a clean subprocess — no PTY, no zombie processes
+- **Windows**: Claude CLI resolved at `~/.claude/local/claude.exe` or via PATH
+- **Linux/macOS**: Claude CLI resolved via PATH
+- Each `claude -p` invocation is a clean subprocess -- no PTY, no zombie processes
+- PM2 is used for background process management and log persistence
 
 ## Contributing
 
-Contributions are welcome! Please:
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run tests: `npm test`
-5. Submit a pull request
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code style, and PR guidelines.
 
 ## License
 
-[MIT](LICENSE) — Federico González
+[MIT](LICENSE)
