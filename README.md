@@ -4,7 +4,7 @@
 
 Code Orchestrator turns AI coding agents into an autonomous multi-phase build system. It analyzes your project, generates a phased execution plan, runs each task via `claude -p`, self-reviews and scores every output, auto-fixes failures, and validates the result -- all with crash recovery and real-time monitoring.
 
-[![CI](https://github.com/fedevgonzalez/claude-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/fedevgonzalez/claude-orchestrator/actions/workflows/ci.yml)
+[![CI](https://github.com/fedevgonzalez/code-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/fedevgonzalez/code-orchestrator/actions/workflows/ci.yml)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js 18+](https://img.shields.io/badge/node-18%2B-green.svg)](https://nodejs.org)
 [![npm](https://img.shields.io/npm/v/code-orchestrator)](https://www.npmjs.com/package/code-orchestrator)
@@ -356,7 +356,7 @@ Override any detected command in your `.orchestrator.config.mjs`.
 ## Architecture Overview
 
 ```
-claude-orchestrator/
+code-orchestrator/
 ├── watcher/
 │   ├── cli.mjs                  # CLI entry point, subcommand routing, PM2 daemon management
 │   ├── watcher.mjs              # Supervisor: HTTP/WS server, auto-restart, lifecycle

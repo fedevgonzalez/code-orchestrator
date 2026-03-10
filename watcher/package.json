@@ -32,12 +32,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/fedevgonzalez/claude-orchestrator.git"
+    "url": "git+https://github.com/fedevgonzalez/code-orchestrator.git"
   },
   "bugs": {
-    "url": "https://github.com/fedevgonzalez/claude-orchestrator/issues"
+    "url": "https://github.com/fedevgonzalez/code-orchestrator/issues"
   },
-  "homepage": "https://github.com/fedevgonzalez/claude-orchestrator#readme",
+  "homepage": "https://github.com/fedevgonzalez/code-orchestrator#readme",
   "engines": {
     "node": ">=18.0.0"
   },

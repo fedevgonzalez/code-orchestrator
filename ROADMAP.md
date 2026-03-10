@@ -44,4 +44,4 @@ This roadmap reflects planned features and improvements. Priorities may shift ba
 
 ---
 
-Have a feature idea? [Open an issue](https://github.com/fedevgonzalez/claude-orchestrator/issues/new?template=feature_request.md).
+Have a feature idea? [Open an issue](https://github.com/fedevgonzalez/code-orchestrator/issues/new?template=feature_request.md).

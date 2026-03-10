@@ -5,8 +5,8 @@ Contributions are welcome. This guide covers development setup, code conventions
 ## Development Setup
 
 ```bash
-git clone https://github.com/fedevgonzalez/claude-orchestrator.git
-cd claude-orchestrator/watcher
+git clone https://github.com/fedevgonzalez/code-orchestrator.git
+cd code-orchestrator/watcher
 npm install
 ```
 
@@ -185,7 +185,7 @@ Available hook events: `beforeRun`, `afterRun`, `beforePhase`, `afterPhase`, `be
 
 ## Reporting Issues
 
-Open an issue at https://github.com/fedevgonzalez/claude-orchestrator/issues with:
+Open an issue at https://github.com/fedevgonzalez/code-orchestrator/issues with:
 
 - Steps to reproduce the problem
 - Expected vs. actual behavior

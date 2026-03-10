@@ -1,5 +1,5 @@
 blank_issues_enabled: true
 contact_links:
   - name: Documentation
-    url: https://github.com/fedevgonzalez/claude-orchestrator#readme
+    url: https://github.com/fedevgonzalez/code-orchestrator#readme
     about: Check the README before opening an issue
