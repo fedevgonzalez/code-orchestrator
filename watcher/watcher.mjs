@@ -209,12 +209,16 @@ function startOrchestrator(forceResume = false) {
   const hasPrompt = !!args.prompt;
   const isNonBuildMode = args.mode && args.mode !== "build";
 
-  // For non-build modes with a prompt, don't auto-resume old checkpoint
-  const isResume = !hasPrompt && (forceResume || args.resume || state.orchestrator.restarts > 0);
-  const specPath = !isResume && args.spec ? resolve(args.spec) : undefined;
+  // Auto-restart (restarts > 0) should ALWAYS resume from checkpoint
+  // First launch with --prompt should NOT resume old checkpoint
+  const isAutoRestart = state.orchestrator.restarts > 0;
+  const isResume = forceResume || args.resume || isAutoRestart;
 
-  if (!isResume && !specPath && !hasPrompt && !isNonBuildMode) {
-    // Check if checkpoint exists for implicit resume (build mode only)
+  // On first launch with a new prompt, don't resume — start fresh
+  if (hasPrompt && !isAutoRestart && !args.resume && !forceResume) {
+    // Fresh non-build execution
+  } else if (!isResume && !args.spec && !hasPrompt && !isNonBuildMode) {
+    // No mode specified — try auto-resume from checkpoint (build mode)
     const cpPath = join(PROJECT_CWD, ".orchestrator", "checkpoint.json");
     if (existsSync(cpPath)) {
       return startOrchestrator(true);
@@ -225,6 +229,8 @@ function startOrchestrator(forceResume = false) {
     );
     return;
   }
+
+  const specPath = !isResume && args.spec ? resolve(args.spec) : undefined;
 
   state.orchestrator.status = "running";
   state.orchestrator.startedAt = Date.now();
