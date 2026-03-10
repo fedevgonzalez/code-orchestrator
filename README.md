@@ -4,6 +4,7 @@
 
 Claude Orchestrator turns Claude Code into an autonomous multi-phase build system. It analyzes your project, generates a phased execution plan, runs each task via `claude -p`, self-reviews and scores every output, auto-fixes failures, and validates the result -- all with crash recovery and real-time monitoring.
 
+[![CI](https://github.com/fedevgonzalez/claude-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/fedevgonzalez/claude-orchestrator/actions/workflows/ci.yml)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js 18+](https://img.shields.io/badge/node-18%2B-green.svg)](https://nodejs.org)
 [![npm](https://img.shields.io/npm/v/claude-orchestrator)](https://www.npmjs.com/package/claude-orchestrator)
@@ -445,6 +446,10 @@ Claude Orchestrator calls `claude -p` for each task, review, and fix attempt. Co
 | `build` (full project) | 50-200+ | $5.00 - $30.00+ |
 
 Use `--dry-run` to preview the plan and estimate calls before executing. The dashboard shows real-time cost tracking during execution.
+
+## Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for planned features and what's coming next.
 
 ## Security
 
