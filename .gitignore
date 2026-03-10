@@ -13,3 +13,5 @@ Thumbs.db
 *.jsonl
 *.lock
 .claude
+_docs/
+/vscode-extension
