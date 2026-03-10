@@ -1,6 +1,7 @@
 import { spawn, execSync } from "child_process";
 import * as http from "http";
 import * as path from "path";
+import * as fs from "fs";
 
 export interface RunningInstance {
   name: string;
@@ -53,6 +54,49 @@ export class OrchestratorRunner {
   }
 
   /**
+   * Find the best way to invoke code-orch.
+   * Priority: local cli.mjs (monorepo dev) > global binary > npx
+   */
+  private findCommand(cwd: string): { cmd: string; prefix: string[] } {
+    // 1. Check if we're in the code-orchestrator repo itself (dev mode)
+    const localCli = path.join(cwd, "watcher", "cli.mjs");
+    if (fs.existsSync(localCli)) {
+      return { cmd: "node", prefix: [localCli] };
+    }
+
+    // 2. Check common global npm bin locations
+    const isWindows = process.platform === "win32";
+    const globalPaths = isWindows
+      ? [
+          path.join(process.env.APPDATA || "", "npm", "code-orch.cmd"),
+          path.join(process.env.NVM_SYMLINK || "C:\\nvm4w\\nodejs", "code-orch.cmd"),
+        ]
+      : ["/usr/local/bin/code-orch", "/usr/bin/code-orch"];
+
+    const home = process.env.HOME || process.env.USERPROFILE || "";
+    globalPaths.push(path.join(home, ".local", "bin", "code-orch"));
+
+    for (const p of globalPaths) {
+      if (fs.existsSync(p)) {
+        return { cmd: p, prefix: [] };
+      }
+    }
+
+    // 3. Try `which` / `where` synchronously
+    try {
+      const bin = execSync(isWindows ? "where code-orch" : "which code-orch", {
+        windowsHide: true, timeout: 5000, stdio: ["pipe", "pipe", "pipe"],
+      }).toString().trim().split("\n")[0].trim();
+      if (bin && fs.existsSync(bin)) {
+        return { cmd: bin, prefix: [] };
+      }
+    } catch { /* not found */ }
+
+    // 4. Fallback: use npx (always available if npm is installed)
+    return { cmd: isWindows ? "npx.cmd" : "npx", prefix: ["code-orch"] };
+  }
+
+  /**
    * Start an orchestrator run via the CLI.
    */
   async start(
@@ -61,16 +105,13 @@ export class OrchestratorRunner {
     cwd: string
   ): Promise<{ success: boolean; error?: string }> {
     return new Promise((resolve) => {
-      // Find code-orch binary — try npx first, then global
       const isWindows = process.platform === "win32";
       const shell = isWindows;
 
-      const args =
-        mode === "build"
-          ? [mode, prompt, "--cwd", cwd]
-          : [mode, prompt, "--cwd", cwd];
+      const { cmd, prefix } = this.findCommand(cwd);
+      const args = [...prefix, mode, prompt, "--cwd", cwd];
 
-      const proc = spawn("code-orch", args, {
+      const proc = spawn(cmd, args, {
         cwd,
         shell,
         stdio: ["ignore", "pipe", "pipe"],
@@ -115,7 +156,8 @@ export class OrchestratorRunner {
    */
   async stop(cwd: string): Promise<void> {
     return new Promise((resolve) => {
-      const proc = spawn("code-orch", ["--stop", cwd], {
+      const { cmd, prefix } = this.findCommand(cwd);
+      const proc = spawn(cmd, [...prefix, "--stop", cwd], {
         shell: process.platform === "win32",
         stdio: "ignore",
         windowsHide: true,
