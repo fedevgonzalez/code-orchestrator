@@ -65,10 +65,14 @@ Crash recovery saves a checkpoint after every task. On failure, the supervisor a
 npm install -g code-orchestrator
 ```
 
+This installs three equivalent binaries: `code-orch`, `claude-orch`, and `claude-orchestrator`. Use whichever you prefer.
+
+> **Note:** PM2 must be installed globally (`npm i -g pm2`). The tool will not start without it.
+
 Or run directly with npx:
 
 ```bash
-npx code-orchestrator feature "add dark mode" --cwd /path/to/project
+npx code-orch feature "add dark mode" --cwd /path/to/project
 ```
 
 ### Usage by Mode
@@ -76,50 +80,50 @@ npx code-orchestrator feature "add dark mode" --cwd /path/to/project
 **Build** -- create a full project from a spec file (24 phases, from scaffolding to deployment):
 
 ```bash
-claude-orch build spec.md
+code-orch build spec.md
 ```
 
 **Feature** -- add a feature to an existing project:
 
 ```bash
-claude-orch feature "add Stripe billing with free/pro tiers" --cwd .
+code-orch feature "add Stripe billing with free/pro tiers" --cwd .
 ```
 
 **Fix** -- diagnose and fix a bug (even vague descriptions work):
 
 ```bash
-claude-orch fix "users can't reset their password" --cwd .
+code-orch fix "users can't reset their password" --cwd .
 ```
 
 **Audit** -- run a code audit (security, performance, quality, accessibility):
 
 ```bash
-claude-orch audit --type security --cwd .
-claude-orch audit --fix --cwd .          # audit + auto-fix
+code-orch audit --type security --cwd .
+code-orch audit --fix --cwd .          # audit + auto-fix
 ```
 
 **Test** -- run tests, generate missing tests, fix failures:
 
 ```bash
-claude-orch test --fix --cwd .
+code-orch test --fix --cwd .
 ```
 
 **Review** -- comprehensive code review with detailed report:
 
 ```bash
-claude-orch review --cwd .
+code-orch review --cwd .
 ```
 
 **Refactor** -- refactor code with regression checks:
 
 ```bash
-claude-orch refactor "extract auth into a standalone service" --cwd .
+code-orch refactor "extract auth into a standalone service" --cwd .
 ```
 
 **Exec** -- generic prompt (catch-all for anything else):
 
 ```bash
-claude-orch exec "update all dependencies and fix breaking changes" --cwd .
+code-orch exec "update all dependencies and fix breaking changes" --cwd .
 ```
 
 ### Dry Run
@@ -127,18 +131,18 @@ claude-orch exec "update all dependencies and fix breaking changes" --cwd .
 Preview the execution plan without running any tasks:
 
 ```bash
-claude-orch feature "add notifications" --cwd . --dry-run
+code-orch feature "add notifications" --cwd . --dry-run
 ```
 
 ### Monitor Running Instances
 
 ```bash
-claude-orch --status              # list all running instances
-claude-orch --logs myproject      # view live progress
-claude-orch --stop myproject      # stop an instance
-claude-orch --stop-all            # stop everything
-claude-orch --restart myproject   # restart an instance
-claude-orch --resume /path/to    # resume from checkpoint
+code-orch --status              # list all running instances
+code-orch --logs myproject      # view live progress
+code-orch --stop myproject      # stop an instance
+code-orch --stop-all            # stop everything
+code-orch --restart myproject   # restart an instance
+code-orch --resume /path/to    # resume from checkpoint
 ```
 
 ### Auto-Recovery (Watchdog)
@@ -146,9 +150,9 @@ claude-orch --resume /path/to    # resume from checkpoint
 Install the system watchdog so orchestrator processes automatically restart after a reboot or crash:
 
 ```bash
-claude-orch --install-watchdog    # register system-level auto-recovery
-claude-orch --watchdog-status     # check if watchdog is active
-claude-orch --uninstall-watchdog  # remove the watchdog
+code-orch --install-watchdog    # register system-level auto-recovery
+code-orch --watchdog-status     # check if watchdog is active
+code-orch --uninstall-watchdog  # remove the watchdog
 ```
 
 On Windows this creates a scheduled task that runs on logon. On Linux/macOS it adds a cron job (every 10 minutes). The watchdog calls `pm2 resurrect` to restore any saved orchestrator processes.

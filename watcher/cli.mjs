@@ -299,35 +299,35 @@ function showHelp() {
   Code Orchestrator — Multi-mode Developer Tool
 
   Build (0→100 from spec):
-    node cli.mjs build <spec.md>                       Full project from spec
-    node cli.mjs <spec.md>                             (shorthand)
+    code-orch build <spec.md>                          Full project from spec
+    code-orch <spec.md>                                (shorthand)
 
   Develop:
-    node cli.mjs feature "add dark mode" --cwd .       Add a feature
-    node cli.mjs fix "login button broken" --cwd .     Fix a bug
-    node cli.mjs refactor "extract auth service"       Refactoring
+    code-orch feature "add dark mode" --cwd .          Add a feature
+    code-orch fix "login button broken" --cwd .        Fix a bug
+    code-orch refactor "extract auth service" --cwd .  Refactoring
 
   Quality:
-    node cli.mjs audit --cwd . [--type security]       Code audit
-    node cli.mjs audit --fix --cwd .                   Audit + auto-fix
-    node cli.mjs test --cwd . [--fix]                  Run tests, fix failures
-    node cli.mjs review --cwd .                        Full code review
+    code-orch audit --cwd . [--type security]          Code audit
+    code-orch audit --fix --cwd .                      Audit + auto-fix
+    code-orch test --cwd . [--fix]                     Run tests, fix failures
+    code-orch review --cwd .                           Full code review
 
   Generic:
-    node cli.mjs exec "do something" --cwd .           Any prompt
+    code-orch exec "do something" --cwd .              Any prompt
 
   Resume & Monitor:
-    node cli.mjs --resume <project-dir>                Resume from checkpoint
-    node cli.mjs --status                              All running instances
-    node cli.mjs --logs [name]                         View logs
-    node cli.mjs --stop [name]                         Stop instance
-    node cli.mjs --stop-all                            Stop everything
-    node cli.mjs --restart [name]                      Restart instance
+    code-orch --resume <project-dir>                   Resume from checkpoint
+    code-orch --status                                 All running instances
+    code-orch --logs [name]                            View logs
+    code-orch --stop [name]                            Stop instance
+    code-orch --stop-all                               Stop everything
+    code-orch --restart [name]                         Restart instance
 
   Watchdog (auto-recovery after reboot/crash):
-    node cli.mjs --install-watchdog                    Register system watchdog
-    node cli.mjs --uninstall-watchdog                  Remove system watchdog
-    node cli.mjs --watchdog-status                     Check watchdog status
+    code-orch --install-watchdog                       Register system watchdog
+    code-orch --uninstall-watchdog                     Remove system watchdog
+    code-orch --watchdog-status                        Check watchdog status
 
   Options:
     --cwd <dir>        Project directory (default: current)
@@ -337,14 +337,16 @@ function showHelp() {
     --no-review        Skip code review step
     --dry-run          Generate plan without executing (preview mode)
 
+  Aliases: code-orch, claude-orch, claude-orchestrator (all identical)
+
   Examples:
-    node cli.mjs build G:/projects/my-saas/spec.md
-    node cli.mjs feature "add Stripe billing" --cwd G:/projects/my-saas
-    node cli.mjs fix "users can't reset password" --cwd .
-    node cli.mjs audit --type security --cwd G:/projects/my-saas
-    node cli.mjs test --fix --cwd .
-    node cli.mjs review --cwd G:/projects/my-saas
-    node cli.mjs refactor "split monolith into modules" --cwd .
-    node cli.mjs exec "update all deps and fix breaking changes" --cwd .
+    code-orch build ./spec.md
+    code-orch feature "add Stripe billing" --cwd /path/to/project
+    code-orch fix "users can't reset password" --cwd .
+    code-orch audit --type security --cwd .
+    code-orch test --fix --cwd .
+    code-orch review --cwd .
+    code-orch refactor "split monolith into modules" --cwd .
+    code-orch exec "update all deps and fix breaking changes" --cwd .
   `);
 }
