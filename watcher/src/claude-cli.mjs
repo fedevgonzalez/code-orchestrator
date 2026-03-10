@@ -56,6 +56,7 @@ export function runClaudePrompt(prompt, cwd, opts = {}) {
     timeoutMs = 600_000,
     onStderr = null,
     maxTurns = null,
+    verbose = false,
   } = opts;
 
   const claudeBin = findClaudeBinary();
@@ -128,11 +129,18 @@ export function runClaudePrompt(prompt, cwd, opts = {}) {
 
       try {
         const json = JSON.parse(stdout);
+        let costUsd = json.cost_usd ?? json.total_cost ?? json.cost ?? 0;
+        if (!costUsd && json.usage) {
+          costUsd = json.usage.cost_usd ?? json.usage.total_cost ?? json.usage.cost ?? 0;
+        }
+        if (costUsd === 0 && opts.verbose) {
+          console.log(`[CLAUDE-CLI] Cost is 0. Available keys: ${Object.keys(json).join(", ")}`);
+        }
         resolve({
           result: json.result || "",
           sessionId: json.session_id || sessionId,
-          costUsd: json.cost_usd || 0,
-          durationMs: json.duration_ms || 0,
+          costUsd,
+          durationMs: json.duration_ms || json.duration || 0,
           raw: json,
         });
       } catch {

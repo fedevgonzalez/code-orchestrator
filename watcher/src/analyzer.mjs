@@ -68,9 +68,13 @@ function scanStructure(dir, maxDepth = 3, currentDepth = 0, prefix = "") {
         } else {
           entries.push({ path: relativePath, type: "file" });
         }
-      } catch {}
+      } catch (e) {
+        console.log(`[ANALYZER] Failed to stat ${fullPath}: ${e.message}`);
+      }
     }
-  } catch {}
+  } catch (e) {
+    console.log(`[ANALYZER] Failed to read directory ${dir}: ${e.message}`);
+  }
 
   return entries;
 }

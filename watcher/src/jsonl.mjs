@@ -230,7 +230,7 @@ export class JSONLWatcher {
           if (state === AgentState.IDLE) {
             this._emit({
               type: "turn_complete",
-              durationMs: record.duration_ms || record.costMs || 0,
+              durationMs: record.duration_ms || 0,
               timestamp: Date.now(),
             });
           }

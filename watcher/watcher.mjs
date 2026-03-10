@@ -45,7 +45,7 @@ const { values: args } = parseArgs({
 
 const PROJECT_CWD = resolve(args.cwd);
 const PORT = parseInt(args.port, 10);
-const DEV_PORT = parseInt(args["dev-port"], 10);
+const DEV_PORT = parseInt(args["dev-port"], 10) || 3000;
 const VERBOSE = args.verbose;
 const MAX_RESTARTS = parseInt(args["max-restarts"], 10);
 

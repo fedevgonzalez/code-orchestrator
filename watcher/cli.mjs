@@ -150,15 +150,18 @@ function startDaemon({ cwd, mode, specPath, prompt, flags, resume }) {
   const port = 3111 + Math.abs(simpleHash(name)) % 89;
 
   const devPortArg = getArgAfter("--dev-port");
+  const computedDevPort = 3000 + Math.abs(simpleHash(name)) % 100;
   let devPort;
   if (devPortArg) {
     devPort = parseInt(devPortArg, 10);
+    if (Number.isNaN(devPort)) devPort = computedDevPort;
   } else {
     const savedPortFile = resolve(cwd, ".orchestrator", "dev-port");
     if (existsSync(savedPortFile)) {
       devPort = parseInt(readFileSync(savedPortFile, "utf-8").trim(), 10);
+      if (Number.isNaN(devPort)) devPort = computedDevPort;
     } else {
-      devPort = 3000 + Math.abs(simpleHash(name)) % 100;
+      devPort = computedDevPort;
     }
   }
 
@@ -171,7 +174,7 @@ function startDaemon({ cwd, mode, specPath, prompt, flags, resume }) {
   }
 
   if (prompt) {
-    watcherArgs += ` --prompt "${prompt.replace(/"/g, '\\"')}"`;
+    watcherArgs += ` --prompt "${shellEscape(prompt)}"`;
   }
 
   if (flags?.type) watcherArgs += ` --audit-type ${flags.type}`;
@@ -232,6 +235,10 @@ function getArgAfter(flag) {
   const idx = rawArgs.indexOf(flag);
   const next = rawArgs[idx + 1];
   return next && !next.startsWith("--") ? next : null;
+}
+
+function shellEscape(str) {
+  return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$').replace(/`/g, '\\`');
 }
 
 function simpleHash(str) {

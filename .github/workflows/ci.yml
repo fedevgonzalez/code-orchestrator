@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node-version: [18, 20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: Install dependencies
+        working-directory: watcher
+        run: npm ci --ignore-scripts
+      - name: Run tests
+        working-directory: watcher
+        run: npm test
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Check package.json is valid
+        working-directory: watcher
+        run: node -e "require('./package.json')"
+      - name: Check imports resolve
+        working-directory: watcher
+        run: node -e "import('./src/models.mjs').then(() => console.log('OK'))"
+      - name: Verify npm pack
+        working-directory: watcher
+        run: npm pack --dry-run

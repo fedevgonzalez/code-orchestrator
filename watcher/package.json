@@ -1,23 +1,62 @@
 {
   "name": "claude-orchestrator",
-  "version": "2.0.0",
-  "description": "Autonomous dual-agent SaaS builder — spawns Claude Code, reviews, validates, repeats",
+  "version": "2.1.0",
+  "description": "Autonomous multi-mode developer tool powered by Claude Code. Build, fix, audit, test, review, refactor — all with automatic code review and crash recovery.",
   "main": "watcher.mjs",
   "type": "module",
   "bin": {
-    "claude-orch": "./cli.mjs"
+    "claude-orch": "./cli.mjs",
+    "claude-orchestrator": "./cli.mjs"
   },
   "scripts": {
     "start": "node cli.mjs",
+    "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --passWithNoTests",
+    "test:watch": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --watch",
     "logs": "node cli.mjs --logs",
     "stop": "node cli.mjs --stop",
     "status": "node cli.mjs --status"
   },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "orchestrator",
+    "ai",
+    "automation",
+    "code-review",
+    "code-generation",
+    "developer-tools",
+    "cli"
+  ],
+  "author": "Federico González",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fedevgonzalez/claude-orchestrator.git"
+  },
+  "bugs": {
+    "url": "https://github.com/fedevgonzalez/claude-orchestrator/issues"
+  },
+  "homepage": "https://github.com/fedevgonzalez/claude-orchestrator#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "cli.mjs",
+    "watcher.mjs",
+    "src/",
+    "ecosystem.config.cjs"
+  ],
   "dependencies": {
     "chokidar": "^3.6.0",
-    "node-pty": "^1.0.0",
-    "pg": "^8.20.0",
     "which": "^4.0.0",
     "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "jest": "^29.7.0"
+  },
+  "optionalDependencies": {
+    "node-pty": "^1.0.0",
+    "pg": "^8.20.0"
   }
 }
